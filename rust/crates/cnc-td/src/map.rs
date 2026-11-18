@@ -3,7 +3,9 @@
 //! `MAP.CPP`).
 //!
 //! The `.BIN` file holds two bytes per cell for all 64x64 cells, row by row: the template
-//! id and the icon within it. A template byte of 255 means no template (clear ground).
+//! id and the icon within it. A template byte of 255 means no template (clear ground); the
+//! game writes those cells as `255, 0`, and so does [`Templates::to_bin`]. (The C# editor
+//! wrote `255, 255`; both read back the same.)
 
 use std::fmt;
 
@@ -78,7 +80,7 @@ impl Templates {
             .iter()
             .flat_map(|tile| match tile {
                 Some(t) => [t.template, t.icon],
-                None => [NO_TEMPLATE, NO_TEMPLATE],
+                None => [NO_TEMPLATE, 0],
             })
             .collect()
     }
@@ -132,7 +134,7 @@ mod tests {
 
         let bin = templates.to_bin();
         assert_eq!(bin.len(), BIN_SIZE);
-        assert_eq!(&bin[..2], &[0xFF, 0xFF]);
+        assert_eq!(&bin[..2], &[0xFF, 0x00]);
 
         let back = Templates::from_bin(&bin).expect("full file");
         assert_eq!(back, templates);

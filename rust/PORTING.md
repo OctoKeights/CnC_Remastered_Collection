@@ -43,7 +43,8 @@ Done (with tests):
 
 - [x] Westwood CRC (`CRC.CPP`, `Calculate_CRC`), checked against a transliteration of the assembly
 - [x] LCW decode (`LCWUNCMP.CPP`) and encode (editor `WWCompression.cs`, with hash chains instead of the quadratic search)
-- [x] MIX archives, classic and RA extended headers (`MIXFILE.CPP`)
+- [x] MIX archives, classic and RA extended headers (`MIXFILE.CPP`), including RA's
+      encrypted headers (`BLOWFISH.CPP`, `PK.CPP`, `INT.CPP`/`MP.CPP`)
 - [x] MEG archives (editor `Megafile.cs`)
 - [x] INI parsing/writing with RA's rules and typed getters (`INI.CPP`)
 - [x] `[MapPack]` / `[OverlayPack]` packing (`LCWStraw`/`LCWPipe` + Base64)
@@ -55,25 +56,39 @@ Done (with tests):
 
 Next, roughly in dependency order:
 
-1. **Encrypted RA MIX headers**: `BLOWFISH.CPP`, `PK.CPP`, `INT.CPP` (bignum), `SHA.CPP`.
-2. **Assets**: `SHP` shapes (`KEYFRAME.CPP`), palettes, icon sets/templates (`ICONSET`),
+1. **Assets**: `SHP` shapes (`KEYFRAME.CPP`), palettes, icon sets/templates (`ICONSET`),
    `AUD` audio (`ADPCM.CPP`), VQA video. Remastered TGA/ZIP art via MEG.
-3. **Rules and type data**: the `*DATA.CPP` tables as data, `RULES.CPP` / `RULES.INI`
+2. **Rules and type data**: the `*DATA.CPP` tables as data, `RULES.CPP` / `RULES.INI`
    (RA), `TechnoTypeClass` hierarchy as traits/structs.
-4. **Scenario loading**: `SCENARIO.CPP`, `IOMAP.CPP`, `IOOBJ.CPP`, houses, teams,
+3. **Scenario loading**: `SCENARIO.CPP`, `IOMAP.CPP`, `IOOBJ.CPP`, houses, teams,
    triggers (`TRIGGER`, `TEAMTYPE`, RA `TEVENT`/`TACTION`).
-5. **Simulation core**: `MAP`/`CELL`, `OBJECT` → `TECHNO` → `FOOT` → unit classes,
+4. **Simulation core**: `MAP`/`CELL`, `OBJECT` → `TECHNO` → `FOOT` → unit classes,
    `FINDPATH.CPP`, `COMBAT.CPP`, `BULLET`, `ANIM`, `HOUSE`, `FACTORY`, `LOGIC.CPP`.
    This is the bulk of the work, and replacing the C++ class hierarchy and its global
    heaps (`HEAP.CPP`) with arenas/ids is the main design decision.
-6. **Lockstep networking and events**: `EVENT.CPP`, `QUEUE.CPP` (the IPX/modem layers are
+5. **Lockstep networking and events**: `EVENT.CPP`, `QUEUE.CPP` (the IPX/modem layers are
    obsolete and won't be ported as-is).
-7. **Front end**: rendering, input, sidebar, audio. This needs dependencies (windowing,
+6. **Front end**: rendering, input, sidebar, audio. This needs dependencies (windowing,
    GPU, audio) and is where the std-only rule ends.
-8. **Editor**: the rest of `Model/` (objects, triggers, teams), tools, then a UI.
+7. **Editor**: the rest of `Model/` (objects, triggers, teams), tools, then a UI.
 
 Not planned: DOS/Win95 platform code (`DPMI`, `IPX*`, `MONOC`, DirectDraw), and the
 inline assembly kept in `MiscAsm.cpp` beyond the routines the simulation needs.
+
+## Testing against the real game
+
+`crates/cnc-editor/tests/real_data.rs` checks the readers against an installed copy of the
+Remastered Collection: every MIX it can find (TD plain, RA encrypted and nested), the MEG
+archives, all 47 TD campaign maps in `GENERAL.MIX` (load, save, reload), loose TD and RA
+community maps, and RA's `RULES.INI`. It is skipped unless `CNC_REMASTERED_DIR` is set:
+
+```sh
+CNC_REMASTERED_DIR="C:/Program Files (x86)/Steam/steamapps/common/CnCRemastered" \
+    cargo test -p cnc-editor --test real_data -- --nocapture
+```
+
+Findings from the real data so far: the game writes clear `.BIN` cells as `255, 0` (the
+editor wrote `255, 255`), and `RULES.INI` doesn't define the Aftermath units or the ants.
 
 ## Building
 

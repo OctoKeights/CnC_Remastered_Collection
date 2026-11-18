@@ -6,6 +6,7 @@
 //! | Module | Ported from |
 //! |---|---|
 //! | [`crc`] | `CRC.CPP`, `Calculate_CRC` in `MiscAsm.cpp`, editor `CRC.cs` |
+//! | [`crypto`] | `BLOWFISH.CPP`, `PK.CPP`, `INT.CPP`/`MP.CPP` (MIX header encryption) |
 //! | [`lcw`] | `LCWUNCMP.CPP`, editor `WWCompression.cs` |
 //! | [`base64`] | `BASE64.CPP` |
 //! | [`mix`] | `MIXFILE.CPP` (both games) |
@@ -20,6 +21,7 @@
 
 pub mod base64;
 pub mod crc;
+pub mod crypto;
 pub mod fixed;
 pub mod geometry;
 pub mod ini;

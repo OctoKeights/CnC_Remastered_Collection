@@ -27,8 +27,9 @@ jobs:
       - run: cargo clippy --workspace --all-targets
       - run: cargo test --workspace
       - run: cargo doc --workspace --no-deps
-      - name: Generated type enums are up to date
+      - name: Generated code is up to date
         run: |
           python3 tools/gen_types.py
+          python3 tools/gen_blowfish.py
           cargo fmt --all
-          git diff --exit-code -- crates/*/src/types.rs
+          git diff --exit-code -- crates/

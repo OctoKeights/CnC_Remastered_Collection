@@ -212,7 +212,7 @@ mod tests {
 
     #[test]
     fn td_roundtrip() {
-        let mut bin = vec![0xFF; cnc_td::map::BIN_SIZE];
+        let mut bin: Vec<u8> = [0xFF, 0].repeat(cnc_td::map::BIN_SIZE / 2);
         bin[0] = cnc_td::TemplateType::Water.id();
         let text = "[Basic]\nName=Test\n\n[MAP]\nTheater=WINTER\n";
         let scenario = Scenario::load_td(text, &bin).expect("valid");

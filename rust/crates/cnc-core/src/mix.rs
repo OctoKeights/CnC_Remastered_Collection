@@ -13,8 +13,8 @@
 //! Files are identified only by [`mix_id`] of their upper-cased name, so names can't be
 //! listed from the archive itself.
 //!
-//! Encrypted Red Alert headers (Blowfish with an RSA-wrapped key, `PK.CPP` / `BLOWFISH.CPP`)
-//! are detected and reported as [`MixError::Encrypted`]; decryption is still to be ported.
+//! Red Alert headers flagged as encrypted are decrypted with the game's built-in key; see
+//! [`crate::crypto`].
 
 use std::collections::HashMap;
 use std::fmt;
@@ -22,10 +22,12 @@ use std::io::{self, Read, Seek, SeekFrom};
 
 use crate::bytes::Reader;
 use crate::crc::mix_id;
+use crate::crypto::{Blowfish, PublicKey, WESTWOOD_KEY};
 
 const FLAG_DIGEST: u16 = 0x0001;
 const FLAG_ENCRYPTED: u16 = 0x0002;
 const ENTRY_SIZE: u64 = 12;
+const HEADER_SIZE: usize = 6;
 
 /// Errors from reading a MIX archive.
 #[derive(Debug)]
@@ -34,8 +36,6 @@ pub enum MixError {
     Io(io::Error),
     /// The header is truncated or inconsistent.
     Corrupt(&'static str),
-    /// The header is encrypted (Red Alert); decryption isn't implemented yet.
-    Encrypted,
 }
 
 impl fmt::Display for MixError {
@@ -43,7 +43,6 @@ impl fmt::Display for MixError {
         match self {
             Self::Io(e) => write!(f, "MIX I/O error: {e}"),
             Self::Corrupt(why) => write!(f, "corrupt MIX archive: {why}"),
-            Self::Encrypted => f.write_str("encrypted MIX headers are not supported yet"),
         }
     }
 }
@@ -52,7 +51,7 @@ impl std::error::Error for MixError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Io(e) => Some(e),
-            _ => None,
+            Self::Corrupt(_) => None,
         }
     }
 }
@@ -93,39 +92,40 @@ impl MixIndex {
     pub fn read_from<R: Read>(reader: &mut R) -> Result<Self, MixError> {
         let mut first = [0u8; 4];
         reader.read_exact(&mut first)?;
-        let mut prefix = Reader::new(&first);
-        let (lead, second) = (prefix.u16(), prefix.u16());
+        let lead = u16::from_le_bytes([first[0], first[1]]);
+        let flags = u16::from_le_bytes([first[2], first[3]]);
 
-        let (count_raw, size_raw, mut consumed, has_digest) = if lead == Some(0) {
-            let flags = second.unwrap_or_default();
+        let (header, data_start, has_digest) = if lead == 0 {
+            let has_digest = flags & FLAG_DIGEST != 0;
             if flags & FLAG_ENCRYPTED != 0 {
-                return Err(MixError::Encrypted);
+                let (header, consumed) = read_encrypted_header(reader, &WESTWOOD_KEY)?;
+                (header, 4 + consumed, has_digest)
+            } else {
+                let header = read_plain_header(reader, Vec::new())?;
+                let len = header.len() as u64;
+                (header, 4 + len, has_digest)
             }
-            let mut header = [0u8; 6];
-            reader.read_exact(&mut header)?;
-            let mut h = Reader::new(&header);
-            (h.i16(), h.i32(), 10u64, flags & FLAG_DIGEST != 0)
         } else {
-            // Classic header: the four bytes already read are count and the start of size.
-            let mut rest = [0u8; 2];
-            reader.read_exact(&mut rest)?;
-            let header = [first[0], first[1], first[2], first[3], rest[0], rest[1]];
-            let mut h = Reader::new(&header);
-            (h.i16(), h.i32(), 6u64, false)
+            // Classic header: the four bytes already read are the count and part of the size.
+            let header = read_plain_header(reader, first.to_vec())?;
+            let len = header.len() as u64;
+            (header, len, false)
         };
 
-        let count = count_raw
+        let mut h = Reader::new(&header);
+        let count = h
+            .i16()
             .and_then(|c| usize::try_from(c).ok())
             .ok_or(MixError::Corrupt("negative file count"))?;
-        let data_size = size_raw
+        let data_size = h
+            .i32()
             .and_then(|s| u32::try_from(s).ok())
             .ok_or(MixError::Corrupt("negative data size"))?;
+        let table = h
+            .take(count * ENTRY_SIZE as usize)
+            .ok_or(MixError::Corrupt("truncated file table"))?;
 
-        let mut table = vec![0u8; count * ENTRY_SIZE as usize];
-        reader.read_exact(&mut table)?;
-        consumed += table.len() as u64;
-
-        let mut t = Reader::new(&table);
+        let mut t = Reader::new(table);
         let mut entries = Vec::with_capacity(count);
         let mut by_id = HashMap::with_capacity(count);
         for index in 0..count {
@@ -142,7 +142,7 @@ impl MixIndex {
         Ok(Self {
             entries,
             by_id,
-            data_start: consumed,
+            data_start,
             data_size,
             has_digest,
         })
@@ -183,6 +183,44 @@ impl MixIndex {
     pub fn has_digest(&self) -> bool {
         self.has_digest
     }
+}
+
+/// Reads a plaintext file header and table, given any bytes of it already read.
+fn read_plain_header<R: Read>(reader: &mut R, mut header: Vec<u8>) -> Result<Vec<u8>, MixError> {
+    let have = header.len();
+    header.resize(HEADER_SIZE, 0);
+    reader.read_exact(&mut header[have..])?;
+    let count = i16::from_le_bytes([header[0], header[1]]);
+    let count = usize::try_from(count).map_err(|_| MixError::Corrupt("negative file count"))?;
+    header.resize(HEADER_SIZE + count * ENTRY_SIZE as usize, 0);
+    reader.read_exact(&mut header[HEADER_SIZE..])?;
+    Ok(header)
+}
+
+/// Reads an encrypted header (`PKStraw` + `BlowStraw`): a public-key wrapped Blowfish key,
+/// then the header and table Blowfish-encrypted and padded to whole blocks. Returns the
+/// plaintext and the number of bytes consumed.
+fn read_encrypted_header<R: Read>(
+    reader: &mut R,
+    key: &PublicKey,
+) -> Result<(Vec<u8>, u64), MixError> {
+    let mut wrapped = vec![0u8; key.encrypted_len(Blowfish::MAX_KEY_LENGTH)];
+    reader.read_exact(&mut wrapped)?;
+    let bf_key = key.decrypt(&wrapped);
+    let bf = Blowfish::new(bf_key.get(..Blowfish::MAX_KEY_LENGTH).unwrap_or(&bf_key));
+
+    let mut header = vec![0u8; Blowfish::BLOCK_SIZE];
+    reader.read_exact(&mut header)?;
+    bf.decrypt(&mut header);
+    let count = i16::from_le_bytes([header[0], header[1]]);
+    let count = usize::try_from(count).map_err(|_| MixError::Corrupt("negative file count"))?;
+
+    let total = (HEADER_SIZE + count * ENTRY_SIZE as usize).next_multiple_of(Blowfish::BLOCK_SIZE);
+    let mut rest = vec![0u8; total - Blowfish::BLOCK_SIZE];
+    reader.read_exact(&mut rest)?;
+    bf.decrypt(&mut rest);
+    header.extend_from_slice(&rest);
+    Ok((header, (wrapped.len() + total) as u64))
 }
 
 /// A MIX archive over any seekable reader.
@@ -306,10 +344,47 @@ mod tests {
         );
     }
 
+    /// Builds an encrypted archive the way Westwood's tools did, using the private key that
+    /// `CONST.CPP` carries under `CHEAT_KEYS`.
     #[test]
-    fn encrypted_is_reported() {
-        let result = MixIndex::read_from(&mut Cursor::new([0, 0, 2, 0, 0, 0]));
-        assert!(matches!(result, Err(MixError::Encrypted)));
+    fn encrypted_header() {
+        const PRIVATE: &str = "AigKVje8mROcR8QixnxUEF5b29Curkq01DNDWCdOG99XBqH79OaCiTCB";
+        let private_der = crate::base64::decode(PRIVATE).expect("base64");
+        let public_der =
+            crate::base64::decode("AihRvNoIbTn85FZRYNZRcT+i6KpU+maCsEqr3Q5q+LDB5tH7Tz2qQ38V")
+                .expect("base64");
+        let private =
+            PublicKey::from_der_modulus_and_exponent(&public_der, &private_der).expect("der");
+
+        let classic = build([("RULES.INI", b"[General]".as_slice()), ("B", b"bee")]);
+        let table_len = 6 + 2 * ENTRY_SIZE as usize;
+        let (header, body) = classic.split_at(table_len);
+
+        let bf_key: Vec<u8> = (0u8..56).map(|i| i.wrapping_mul(37) ^ 0x5A).collect();
+        let mut plain_key = bf_key.clone();
+        plain_key.resize(2 * WESTWOOD_KEY.plain_block_size(), 0);
+        let wrapped = private.encrypt(&plain_key);
+        assert_eq!(wrapped.len(), 80);
+
+        let mut padded = header.to_vec();
+        padded.resize(header.len().next_multiple_of(8), 0);
+        Blowfish::new(&bf_key).encrypt(&mut padded);
+
+        let mut file = vec![0, 0, 2, 0];
+        file.extend_from_slice(&wrapped);
+        file.extend_from_slice(&padded);
+        file.extend_from_slice(body);
+
+        let mut mix = MixArchive::open(Cursor::new(file)).expect("decrypts");
+        assert_eq!(mix.index().data_start(), 4 + 80 + padded.len() as u64);
+        assert_eq!(
+            mix.read("b").expect("io").as_deref(),
+            Some(b"bee".as_slice())
+        );
+        assert_eq!(
+            mix.read("rules.ini").expect("io").as_deref(),
+            Some(b"[General]".as_slice())
+        );
     }
 
     #[test]
