@@ -1,8 +1,9 @@
 //! Loading and saving scenarios for either game (the `Load` / `Save` halves of the
 //! editor's `TiberianDawn/GamePlugin.cs` and `RedAlert/GamePlugin.cs`).
 //!
-//! Only the map layers are modelled so far; every other section is kept verbatim in the
-//! INI so that a load/save round trip doesn't lose anything.
+//! The map layers, placed objects, waypoints, cell triggers, triggers and team types are
+//! modelled; every other section is kept verbatim in the INI. Object lines the game itself
+//! would skip (an unknown house or type) are dropped on load, as the editor did.
 
 use std::fmt;
 
@@ -91,6 +92,10 @@ pub enum Scenario {
         map: MapInfo<cnc_td::Theater>,
         /// The `.BIN` template layer.
         templates: cnc_td::map::Templates,
+        /// Units, buildings, terrain, overlays, waypoints and cell triggers.
+        objects: cnc_td::scenario::Objects,
+        /// Triggers and team types.
+        scripting: cnc_td::scripting::Scripting,
     },
     /// A Red Alert scenario.
     RedAlert {
@@ -102,6 +107,11 @@ pub enum Scenario {
         templates: cnc_ra::map::Templates,
         /// `[OverlayPack]`.
         overlays: cnc_ra::map::Overlays,
+        /// Units, ships, buildings, terrain, waypoints and cell triggers.
+        objects: cnc_ra::scenario::Objects,
+        /// Triggers and team types, for `NewINIFormat=2` and later (older scenarios keep
+        /// those sections verbatim in the INI).
+        scripting: Option<cnc_ra::scripting::Scripting>,
     },
 }
 
@@ -125,10 +135,21 @@ impl Scenario {
         let map = cnc_td::map::read_map_info(&ini);
         // Store the effective values (defaults included) so the INI matches the model.
         map.write_ini(&mut ini);
+        let templates = cnc_td::map::Templates::from_bin(bin)?;
+        let objects = cnc_td::scenario::Objects::read_ini(&ini);
+        let scripting = cnc_td::scripting::Scripting::read_ini(&ini);
+        for section in cnc_td::scenario::SECTIONS
+            .iter()
+            .chain(&["Triggers", "TeamTypes"])
+        {
+            ini.remove_section(section);
+        }
         Ok(Self::TiberianDawn {
-            map,
-            templates: cnc_td::map::Templates::from_bin(bin)?,
             ini,
+            map,
+            templates,
+            objects,
+            scripting,
         })
     }
 
@@ -143,14 +164,25 @@ impl Scenario {
         map.write_ini(&mut ini);
         let templates = cnc_ra::map::Templates::read_ini(&ini)?;
         let overlays = cnc_ra::map::Overlays::read_ini(&ini)?;
-        // The packed layers are regenerated on save.
+        let objects = cnc_ra::scenario::Objects::read_ini(&ini);
+        let scripting = cnc_ra::scripting::Scripting::read_ini(&ini);
+        // Modelled sections are regenerated on save.
         ini.remove_section(cnc_ra::map::MAP_PACK);
         ini.remove_section(cnc_ra::map::OVERLAY_PACK);
+        for section in cnc_ra::scenario::SECTIONS {
+            ini.remove_section(section);
+        }
+        if scripting.is_some() {
+            ini.remove_section("Trigs");
+            ini.remove_section("TeamTypes");
+        }
         Ok(Self::RedAlert {
             ini,
             map,
             templates,
             overlays,
+            objects,
+            scripting,
         })
     }
 
@@ -163,7 +195,7 @@ impl Scenario {
         }
     }
 
-    /// The INI with every section not modelled separately.
+    /// The INI holding every section that isn't modelled separately.
     #[must_use]
     pub fn ini(&self) -> &Ini {
         match self {
@@ -179,9 +211,13 @@ impl Scenario {
                 ini,
                 map,
                 templates,
+                objects,
+                scripting,
             } => {
                 let mut ini = ini.clone();
                 map.write_ini(&mut ini);
+                objects.write_ini(&mut ini);
+                scripting.write_ini(&mut ini);
                 SavedScenario {
                     ini: ini.to_string(),
                     bin: Some(templates.to_bin()),
@@ -192,11 +228,17 @@ impl Scenario {
                 map,
                 templates,
                 overlays,
+                objects,
+                scripting,
             } => {
                 let mut ini = ini.clone();
                 map.write_ini(&mut ini);
                 templates.write_ini(&mut ini);
                 overlays.write_ini(&mut ini);
+                objects.write_ini(&mut ini);
+                if let Some(scripting) = scripting {
+                    scripting.write_ini(&mut ini);
+                }
                 SavedScenario {
                     ini: ini.to_string(),
                     bin: None,

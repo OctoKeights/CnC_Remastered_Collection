@@ -319,3 +319,195 @@ fn megafiles() {
         println!("{name}: {} files", meg.entries().len());
     }
 }
+
+/// Red Alert's main archive: the CD1 copy if present, else the Aftermath one.
+fn ra_main(root: &std::path::Path) -> Option<MixArchive<BufReader<File>>> {
+    ["RED_ALERT/CD1/MAIN.MIX", "RED_ALERT/AFTERMATH/MAIN.MIX"]
+        .iter()
+        .map(|p| cncdata(root, p))
+        .find(|p| p.exists())
+        .map(|p| open_mix(&p))
+}
+
+fn entry_count(ini: &Ini, sections: &[&str]) -> usize {
+    sections
+        .iter()
+        .filter_map(|s| ini.section(s))
+        .map(cnc_core::ini::Section::len)
+        .sum()
+}
+
+#[test]
+fn tiberian_dawn_scenario_objects_and_scripting() {
+    let Some(root) = root() else { return };
+    let mut general = open_mix(&cncdata(&root, "TIBERIAN_DAWN/CD1/GENERAL.MIX"));
+    let (mut maps, mut objects, mut skipped, mut triggers, mut teams) = (0, 0, 0, 0, 0);
+    for side in ["G", "B"] {
+        for n in 1..=15 {
+            for variant in ["EA", "EB", "EC"] {
+                let stem = format!("SC{side}{n:02}{variant}.INI");
+                let Some(text) = general.read(&stem).expect("io") else {
+                    continue;
+                };
+                let ini = Ini::parse(&String::from_utf8_lossy(&text));
+
+                let parsed = cnc_td::scenario::Objects::read_ini(&ini);
+                let count = parsed.units.len()
+                    + parsed.aircraft.len()
+                    + parsed.infantry.len()
+                    + parsed.structures.len()
+                    + parsed.terrain.len()
+                    + parsed.smudge.len()
+                    + parsed.overlay.len();
+                let raw = entry_count(
+                    &ini,
+                    &[
+                        "UNITS",
+                        "AIRCRAFT",
+                        "INFANTRY",
+                        "STRUCTURES",
+                        "TERRAIN",
+                        "SMUDGE",
+                        "OVERLAY",
+                    ],
+                );
+                skipped += raw - count;
+                objects += count;
+                let mut out = Ini::new();
+                parsed.write_ini(&mut out);
+                assert_eq!(
+                    cnc_td::scenario::Objects::read_ini(&out),
+                    parsed,
+                    "{stem}: objects"
+                );
+
+                let scripting = cnc_td::scripting::Scripting::read_ini(&ini);
+                triggers += scripting.triggers.len();
+                teams += scripting.team_types.len();
+                let mut out = Ini::new();
+                scripting.write_ini(&mut out);
+                assert_eq!(
+                    cnc_td::scripting::Scripting::read_ini(&out),
+                    scripting,
+                    "{stem}: scripting"
+                );
+                maps += 1;
+            }
+        }
+    }
+    println!(
+        "TD: {maps} maps, {objects} objects ({skipped} lines skipped), {triggers} triggers, {teams} teams"
+    );
+    assert!(maps >= 40 && objects > 1000 && triggers > 100 && teams > 50);
+    assert!(
+        skipped * 100 < objects,
+        "too many object lines skipped: {skipped}"
+    );
+}
+
+#[test]
+fn red_alert_campaign_scenarios() {
+    let Some(root) = root() else { return };
+    let Some(mut main) = ra_main(&root) else {
+        return;
+    };
+    let general = main
+        .read("GENERAL.MIX")
+        .expect("io")
+        .expect("GENERAL.MIX in MAIN.MIX");
+    let mut general = MixArchive::open(Cursor::new(general)).expect("GENERAL.MIX");
+    let (mut maps, mut objects, mut skipped, mut triggers, mut teams) = (0, 0, 0, 0, 0);
+    for prefix in ["SCG", "SCU", "SCA"] {
+        for n in 1..=45 {
+            for variant in ["EA", "EB", "EC", "ED"] {
+                let stem = format!("{prefix}{n:02}{variant}.INI");
+                let Some(text) = general.read(&stem).expect("io") else {
+                    continue;
+                };
+                let text = String::from_utf8_lossy(&text);
+                let scenario = Scenario::load_ra(&text).unwrap_or_else(|e| panic!("{stem}: {e}"));
+                let again = Scenario::load_ra(&scenario.save().ini).expect("reload");
+                assert_eq!(again, scenario, "{stem}: map round trip");
+
+                let ini = Ini::parse(&text);
+                let parsed = cnc_ra::scenario::Objects::read_ini(&ini);
+                let count = parsed.units.len()
+                    + parsed.ships.len()
+                    + parsed.aircraft.len()
+                    + parsed.infantry.len()
+                    + parsed.structures.len()
+                    + parsed.terrain.len()
+                    + parsed.smudge.len();
+                let raw = entry_count(
+                    &ini,
+                    &[
+                        "UNITS",
+                        "SHIPS",
+                        "AIRCRAFT",
+                        "INFANTRY",
+                        "STRUCTURES",
+                        "TERRAIN",
+                        "SMUDGE",
+                    ],
+                );
+                skipped += raw - count;
+                objects += count;
+                let mut out = Ini::new();
+                parsed.write_ini(&mut out);
+                assert_eq!(
+                    cnc_ra::scenario::Objects::read_ini(&out),
+                    parsed,
+                    "{stem}: objects"
+                );
+
+                let scripting = cnc_ra::scripting::Scripting::read_ini(&ini)
+                    .unwrap_or_else(|| panic!("{stem}: old INI format"));
+                for team in &scripting.team_types {
+                    if let Some(t) = team.trigger {
+                        assert!(
+                            t < scripting.triggers.len(),
+                            "{stem}: team {} trigger",
+                            team.name
+                        );
+                    }
+                }
+                for trigger in &scripting.triggers {
+                    for team in trigger
+                        .events
+                        .iter()
+                        .map(|e| e.team)
+                        .chain(trigger.actions.iter().map(|a| a.team))
+                        .flatten()
+                    {
+                        assert!(
+                            team < scripting.team_types.len(),
+                            "{stem}: {} team ref",
+                            trigger.name
+                        );
+                    }
+                }
+                triggers += scripting.triggers.len();
+                teams += scripting.team_types.len();
+                let mut out = Ini::new();
+                out.set("Basic", "NewINIFormat", 3);
+                scripting.write_ini(&mut out);
+                assert_eq!(
+                    cnc_ra::scripting::Scripting::read_ini(&out).as_ref(),
+                    Some(&scripting),
+                    "{stem}: scripting"
+                );
+                maps += 1;
+            }
+        }
+    }
+    println!(
+        "RA: {maps} maps, {objects} objects ({skipped} lines skipped), {triggers} triggers, {teams} teams"
+    );
+    // Names can't be listed from a MIX, so this finds the standard campaign names only
+    // (14 in the Aftermath disc's copy).
+    assert!(maps >= 10 && objects > 1000 && triggers > 100 && teams > 50);
+    assert!(
+        skipped * 100 < objects,
+        "too many object lines skipped: {skipped}"
+    );
+}

@@ -5,6 +5,8 @@
 
 pub mod map;
 pub mod rules;
+pub mod scenario;
+pub mod scripting;
 pub mod types;
 
 pub use types::{

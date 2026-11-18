@@ -17,6 +17,7 @@
 //! | [`random`] | `RAND.CPP` (TD), `RANDOM.CPP` (RA) |
 //! | [`map`] | `[Map]` handling in `DISPLAY.CPP` |
 //! | [`named`] | INI-named type enums (`*TypeClass::From_Name`) |
+//! | [`scenario`] | object lines in `UNIT.CPP`, `INFANTRY.CPP`, `BUILDING.CPP`, ... `Read_INI`/`Write_INI` |
 //! | [`geometry`] | `FUNCTION.H` inlines, `COORD.CPP`, facing routines in `MiscAsm.cpp` |
 
 pub mod base64;
@@ -33,5 +34,6 @@ pub mod mix;
 pub mod named;
 pub mod pack;
 pub mod random;
+pub mod scenario;
 
 pub use fixed::Fixed;

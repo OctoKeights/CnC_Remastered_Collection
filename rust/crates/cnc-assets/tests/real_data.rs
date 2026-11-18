@@ -153,3 +153,88 @@ fn ra_nested_assets() {
     }
     println!("decoded {decoded} RA interface shapes");
 }
+
+/// Red Alert's art and sound from `MAIN.MIX` (CD1, or the Aftermath copy).
+#[test]
+fn ra_main_assets() {
+    let Some(root) = std::env::var_os("CNC_REMASTERED_DIR").map(PathBuf::from) else {
+        return;
+    };
+    let Some(path) = ["RED_ALERT/CD1/MAIN.MIX", "RED_ALERT/AFTERMATH/MAIN.MIX"]
+        .iter()
+        .map(|p| root.join("Data/CNCDATA").join(p))
+        .find(|p| p.exists())
+    else {
+        return;
+    };
+    let mut main =
+        MixArchive::open(BufReader::new(File::open(path).expect("open"))).expect("MAIN.MIX");
+    let mut nested = |name: &str| {
+        let data = main
+            .read(name)
+            .expect("io")
+            .unwrap_or_else(|| panic!("{name} in MAIN.MIX"));
+        MixArchive::open(Cursor::new(data)).unwrap_or_else(|e| panic!("{name}: {e}"))
+    };
+
+    let mut conquer = nested("CONQUER.MIX");
+    let names = cnc_ra::UnitType::ALL
+        .iter()
+        .map(|t| t.name())
+        .chain(cnc_ra::InfantryType::ALL.iter().map(|t| t.name()))
+        .chain(cnc_ra::VesselType::ALL.iter().map(|t| t.name()))
+        .chain(cnc_ra::AircraftType::ALL.iter().map(|t| t.name()))
+        .chain(cnc_ra::BuildingType::ALL.iter().map(|t| t.name()));
+    let mut shapes = 0;
+    for name in names {
+        let file = format!("{name}.SHP");
+        if let Some(data) = conquer.read(&file).expect("io") {
+            Shape::decode(&data).unwrap_or_else(|e| panic!("{file}: {e}"));
+            shapes += 1;
+        }
+    }
+
+    let mut templates = 0;
+    for (mix, ext) in [
+        ("TEMPERAT.MIX", "TEM"),
+        ("SNOW.MIX", "SNO"),
+        ("INTERIOR.MIX", "INT"),
+    ] {
+        let mut archive = nested(mix);
+        for template in cnc_ra::TemplateType::ALL {
+            let file = format!("{}.{ext}", template.name());
+            let Some(data) = archive.read(&file).expect("io") else {
+                continue;
+            };
+            let set = IconSet::decode(&data).unwrap_or_else(|e| panic!("{file}: {e}"));
+            assert!(set.map_size.is_some(), "{file}: expected Red Alert layout");
+            assert!(
+                set.map
+                    .iter()
+                    .flatten()
+                    .all(|&i| usize::from(i) < set.icons.len()),
+                "{file}"
+            );
+            templates += 1;
+        }
+    }
+
+    let mut sounds = nested("SOUNDS.MIX");
+    let entries = sounds.index().entries().to_vec();
+    let mut decoded = 0;
+    for entry in entries {
+        let data = sounds.read_entry(entry).expect("io");
+        if let Ok(sound) = Sound::decode(&data) {
+            let bytes = sound.samples.len() * if sound.header.sixteen_bit { 2 } else { 1 };
+            let declared = sound.header.uncompressed_size as usize;
+            assert!(
+                bytes <= declared && declared - bytes <= 2,
+                "sound {:08X}",
+                entry.id
+            );
+            decoded += 1;
+        }
+    }
+    println!("RA: {shapes} object shapes, {templates} templates, {decoded} sounds");
+    assert!(shapes > 50 && templates > 100 && decoded > 50);
+}

@@ -33,10 +33,10 @@ allowed, wrapping these safe crates.
 | Crate | Contents |
 |---|---|
 | `cnc-core` | Shared by everything: CRC, LCW, Base64, MIX, MEG, INI, packed INI sections, `[Map]`, fixed point, RNGs, coordinates/cells/facings, the `named_enum!` macro |
-| `cnc-td` | Tiberian Dawn: theaters, houses, generated object types, `.BIN` template maps |
-| `cnc-ra` | Red Alert: theaters, houses, generated object types (incl. vessels), `[MapPack]` / `[OverlayPack]`, typed `RULES.INI` / `AFTRMATH.INI` |
+| `cnc-td` | Tiberian Dawn: theaters, houses, missions, generated object types, `.BIN` template maps, scenario objects, triggers and team types |
+| `cnc-ra` | Red Alert: theaters, houses, generated object types (incl. vessels), `[MapPack]` / `[OverlayPack]`, typed `RULES.INI` / `AFTRMATH.INI`, scenario objects, `[Trigs]` and `[TeamTypes]` |
 | `cnc-assets` | Palettes, SHP keyframe shapes, terrain icon sets (both games' layouts), AUD audio (SOS ADPCM and Westwood codecs) with WAV export |
-| `cnc-editor` | Editor model: `CellMetrics`, `CellGrid`, `Scenario` load/save for both games |
+| `cnc-editor` | Editor model: `CellMetrics`, `CellGrid`, `Scenario` load/save for both games (map layers, objects, waypoints, cell triggers, triggers, team types) |
 
 ## Status
 
@@ -58,6 +58,10 @@ Done (with tests):
       `tools/gen_ra_rules.py` (with the header comments as docs), plus land types,
       power-ups, missions, house biases and per-object stats for units, infantry,
       ships, aircraft, buildings, weapons, warheads and projectiles
+- [x] Scenario objects for both games (units, ships, aircraft, infantry, structures,
+      terrain, smudges, TD overlays, waypoints, cell triggers) with the original line
+      formats and `strtok`/`atoi` parsing, plus triggers and team types (TD's name-based
+      format; RA's numeric `NewINIFormat` 2+ format)
 - [x] Palettes (`.PAL`), SHP shapes (`KEYFRAME.CPP`, `XORDELTA.ASM`), terrain icon sets
       (`ICONSET.CPP`), AUD audio (`ADPCM.CPP` tables; the type-1 Westwood codec from its
       public description, since its decoder isn't in the release)
@@ -69,8 +73,9 @@ Next, roughly in dependency order:
 2. **Built-in type data**: the constructor values in the `*DATA.CPP` tables. Tiberian
    Dawn has no rules file, so all its stats live there; Red Alert uses them as defaults
    under `RULES.INI`.
-3. **Scenario loading**: `SCENARIO.CPP`, `IOMAP.CPP`, `IOOBJ.CPP`, houses, teams,
-   triggers (`TRIGGER`, `TEAMTYPE`, RA `TEVENT`/`TACTION`).
+3. **Rest of scenario loading**: `[Basic]`, house sections (credits, allies, edges),
+   `[Base]`, briefings, RA's pre-2 trigger/team formats, and names for trigger events,
+   actions and team missions.
 4. **Simulation core**: `MAP`/`CELL`, `OBJECT` → `TECHNO` → `FOOT` → unit classes,
    `FINDPATH.CPP`, `COMBAT.CPP`, `BULLET`, `ANIM`, `HOUSE`, `FACTORY`, `LOGIC.CPP`.
    This is the bulk of the work, and replacing the C++ class hierarchy and its global
@@ -97,13 +102,16 @@ CNC_REMASTERED_DIR="C:/Program Files (x86)/Steam/steamapps/common/CnCRemastered"
 ```
 
 `crates/cnc-assets/tests/real_data.rs` does the same for art and sound: every TD object
-shape, every template in the three TD theaters, all TD sounds, and RA palettes and
-interface shapes from the nested archives.
+shape, every template in the three TD theaters, all TD sounds, and RA's palettes, object
+shapes, templates in all three theaters and sounds from the nested archives. The scenario
+tests parse every object, trigger and team type in the TD and RA campaign maps and check
+that they write back unchanged.
 
 Findings from the real data so far: the game writes clear `.BIN` cells as `255, 0` (the
 editor wrote `255, 255`), `RULES.INI` doesn't define the Aftermath units or the ants, some SOS-compressed sounds
-declare one more sample in their final chunk than they contain, and some Remastered
-`.SHP` files are 0x0 stubs (e.g. RA `SIDEBAR.SHP`).
+declare one more sample in their final chunk than they contain, some Remastered
+`.SHP` files are 0x0 stubs (e.g. RA `SIDEBAR.SHP`), and RA template colour maps have one
+entry per template cell, not per icon.
 
 ## Building
 

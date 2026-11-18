@@ -25,6 +25,7 @@ use cnc_core::ini::{Ini, Section};
 pub use global::{GlobalRules, scale_to_256};
 pub use names::{Armor, Crate, Projectile, Warhead, Weapon};
 
+use crate::scenario::Mission;
 use crate::{AircraftType, BuildingType, House, InfantryType, UnitType, VesselType};
 
 /// A set of houses that may own an object (`Get_Owners`, a `HOUSEF_*` bitfield).
@@ -513,8 +514,8 @@ pub struct Rules {
     pub land: [LandRules; 9],
     /// `[Powerups]`, in [`Crate`] id order.
     pub crates: Vec<CrateRule>,
-    /// Per-mission behaviour, keyed by [`MISSIONS`] name.
-    pub missions: BTreeMap<&'static str, MissionRules>,
+    /// Per-mission behaviour.
+    pub missions: BTreeMap<Mission, MissionRules>,
     /// Warheads with a section.
     pub warheads: BTreeMap<Warhead, WarheadStats>,
     /// Projectiles with a section.
@@ -691,9 +692,9 @@ impl Rules {
                 bias.build_time = s.get_fixed("BuildTime").unwrap_or(bias.build_time);
             }
         }
-        for name in MISSIONS {
-            if let Some(s) = ini.section(name) {
-                let m = self.missions.entry(name).or_default();
+        for &mission in Mission::ALL {
+            if let Some(s) = ini.section(mission.name()) {
+                let m = self.missions.entry(mission).or_default();
                 m.no_threat = s.get_bool("NoThreat").unwrap_or(m.no_threat);
                 m.zombie = s.get_bool("Zombie").unwrap_or(m.zombie);
                 m.recruitable = s.get_bool("Recruitable").unwrap_or(m.recruitable);

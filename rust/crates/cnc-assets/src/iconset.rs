@@ -54,7 +54,8 @@ pub struct IconSet {
     pub map: Vec<Option<u8>>,
     /// Per physical icon: whether it uses colour 0 as transparency.
     pub transparent: Vec<bool>,
-    /// Per physical icon, Red Alert only: the colour control value (`ColorMap`).
+    /// Red Alert only: the colour control values (`ColorMap`), one per cell of the
+    /// `map_size` block.
     pub color_map: Option<Vec<u8>>,
 }
 
@@ -155,10 +156,13 @@ impl IconSet {
             .iter()
             .map(|&t| t != 0)
             .collect();
+        let color_len = layout
+            .map_size
+            .map_or(0, |(w, h)| usize::from(w) * usize::from(h));
         let color_map = layout
             .color_map
             .map(|at| {
-                data.get(at..at + physical)
+                data.get(at..at + color_len)
                     .map(<[u8]>::to_vec)
                     .ok_or(IconSetError::Truncated)
             })
@@ -216,6 +220,34 @@ mod tests {
         assert_eq!(set.transparent, [false, true]);
         assert_eq!(set.cell(0), Some([1u8; 4].as_slice()));
         assert_eq!(set.cell(1), None);
+    }
+
+    /// Mirrors the layout of Red Alert's `S01.TEM`: icons, map, transparency, colour map.
+    #[test]
+    fn decodes_ra_layout() {
+        let (icons, physical, map) = (40usize, 2usize, [0u8, 1, 0xFF, 1]);
+        let map_at = icons + physical * 4;
+        let trans_at = map_at + map.len();
+        let color_at = trans_at + physical;
+        let size = color_at + 4;
+        let mut file = Vec::new();
+        for v in [2i16, 2, 4, 0, 2, 2] {
+            file.extend_from_slice(&v.to_le_bytes());
+        }
+        for v in [size, icons, 0, 0xBEEF, trans_at, color_at, map_at] {
+            file.extend_from_slice(&(v as i32).to_le_bytes());
+        }
+        file.extend_from_slice(&[7; 4]);
+        file.extend_from_slice(&[9; 4]);
+        file.extend_from_slice(&map);
+        file.extend_from_slice(&[0, 1]);
+        file.extend_from_slice(&[1, 2, 3, 4]);
+
+        let set = IconSet::decode(&file).expect("valid");
+        assert_eq!(set.map_size, Some((2, 2)));
+        assert_eq!(set.icons, [vec![7; 4], vec![9; 4]]);
+        assert_eq!(set.map, [Some(0), Some(1), None, Some(1)]);
+        assert_eq!(set.color_map.as_deref(), Some([1u8, 2, 3, 4].as_slice()));
     }
 
     #[test]
