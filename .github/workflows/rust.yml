@@ -1,0 +1,34 @@
+name: Rust
+
+on:
+  push:
+    paths: ["rust/**", ".github/workflows/rust.yml"]
+  pull_request:
+    paths: ["rust/**", ".github/workflows/rust.yml"]
+
+defaults:
+  run:
+    working-directory: rust
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+  RUSTDOCFLAGS: -D warnings
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets
+      - run: cargo test --workspace
+      - run: cargo doc --workspace --no-deps
+      - name: Generated type enums are up to date
+        run: |
+          python3 tools/gen_types.py
+          cargo fmt --all
+          git diff --exit-code -- crates/*/src/types.rs

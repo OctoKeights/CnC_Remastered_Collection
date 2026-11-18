@@ -1,0 +1,13 @@
+[package]
+name = "cnc-core"
+description = "Shared foundations for the Rust port of the C&C Remastered Collection: file formats, fixed-point math, RNG and map geometry."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

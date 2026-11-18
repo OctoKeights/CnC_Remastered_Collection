@@ -1,0 +1,16 @@
+[package]
+name = "cnc-editor"
+description = "Map editor model for the Rust port of the C&C Remastered Collection (from CnCTDRAMapEditor)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cnc-core.workspace = true
+cnc-td.workspace = true
+cnc-ra.workspace = true
+
+[lints]
+workspace = true

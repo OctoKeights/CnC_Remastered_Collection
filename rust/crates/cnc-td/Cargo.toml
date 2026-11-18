@@ -1,0 +1,14 @@
+[package]
+name = "cnc-td"
+description = "Tiberian Dawn game logic for the Rust port of the C&C Remastered Collection."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cnc-core.workspace = true
+
+[lints]
+workspace = true
