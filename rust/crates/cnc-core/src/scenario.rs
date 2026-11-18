@@ -393,3 +393,209 @@ mod tests {
         );
     }
 }
+
+/// A read-only typed view of `[Basic]`. Absent keys are `None`; the games then use their
+/// own defaults (`Read_Scenario_INI`). Movie entries of `x` or `<none>` count as absent.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Basic {
+    /// `Name`: the scenario's description.
+    pub name: Option<String>,
+    /// `Intro`, `Brief`, `Action`, `Win`, `Win2`, `Win3`, `Win4` and `Lose` movies, by key.
+    pub movies: BTreeMap<&'static str, String>,
+    /// `Player`: the human player's house name.
+    pub player: Option<String>,
+    /// `Theme`: music to play.
+    pub theme: Option<String>,
+    /// `CarryOverMoney`: percentage (TD) or fraction (RA) of credits kept.
+    pub carry_over_money: Option<String>,
+    /// `CarryOverCap`: most credits carried over (-1 no limit).
+    pub carry_over_cap: Option<i32>,
+    /// `BuildLevel` (Tiberian Dawn).
+    pub build_level: Option<i32>,
+    /// `Percent` (Red Alert).
+    pub percent: Option<i32>,
+    /// `NewINIFormat` (Red Alert): which trigger/team format the file uses.
+    pub new_ini_format: Option<i32>,
+    /// Yes/no flags present in the section, by key (`ToCarryOver`, `EndOfGame`, ...).
+    pub flags: BTreeMap<String, bool>,
+}
+
+impl Basic {
+    /// Movie keys, in the order the games read them.
+    pub const MOVIES: [&'static str; 8] = [
+        "Intro", "Brief", "Action", "Win", "Win2", "Win3", "Win4", "Lose",
+    ];
+    /// Yes/no keys either game reads.
+    pub const FLAGS: [&'static str; 12] = [
+        "ToCarryOver",
+        "ToInherit",
+        "TimerInherit",
+        "EndOfGame",
+        "CivEvac",
+        "NoSpyPlane",
+        "SkipScore",
+        "OneTimeOnly",
+        "SkipMapSelect",
+        "TruckCrate",
+        "FillSilos",
+        "Official",
+    ];
+
+    /// Reads `[Basic]` (case-insensitive, so Tiberian Dawn's `[BASIC]` too).
+    #[must_use]
+    pub fn read(section: Option<&Section>) -> Self {
+        let Some(s) = section else {
+            return Self::default();
+        };
+        let text = |k: &str| s.get(k).map(str::to_owned);
+        Self {
+            name: text("Name").filter(|n| n != "<none>"),
+            movies: Self::MOVIES
+                .iter()
+                .filter_map(|&k| {
+                    let v = s.get(k)?;
+                    (!v.eq_ignore_ascii_case("x") && v != "<none>").then(|| (k, v.to_owned()))
+                })
+                .collect(),
+            player: text("Player"),
+            theme: text("Theme"),
+            carry_over_money: text("CarryOverMoney"),
+            carry_over_cap: s.get_int("CarryOverCap"),
+            build_level: s.get_int("BuildLevel"),
+            percent: s.get_int("Percent"),
+            new_ini_format: s.get_int("NewINIFormat"),
+            flags: Self::FLAGS
+                .iter()
+                .filter_map(|&k| Some((k.to_owned(), s.get_bool(k)?)))
+                .collect(),
+        }
+    }
+}
+
+/// A read-only typed view of a house's section (`HouseClass::Read_INI`). Absent keys are
+/// `None`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HouseSettings {
+    /// `Credits`, in hundreds.
+    pub credits: Option<i32>,
+    /// `Edge` reinforcements arrive from (`North`, `East`, ...).
+    pub edge: Option<String>,
+    /// `Allies`: house names (Red Alert also accepts `allies` / `soviet`).
+    pub allies: Vec<String>,
+    /// `MaxUnit`.
+    pub max_unit: Option<i32>,
+    /// `MaxBuilding`.
+    pub max_building: Option<i32>,
+    /// `MaxInfantry` (Red Alert).
+    pub max_infantry: Option<i32>,
+    /// `MaxVessel` (Red Alert).
+    pub max_vessel: Option<i32>,
+    /// `TechLevel` (Red Alert).
+    pub tech_level: Option<i32>,
+    /// `IQ` (Red Alert).
+    pub iq: Option<i32>,
+    /// `PlayerControl` (Red Alert).
+    pub player_control: Option<bool>,
+}
+
+impl HouseSettings {
+    /// Reads a house section.
+    #[must_use]
+    pub fn read(s: &Section) -> Self {
+        Self {
+            credits: s.get_int("Credits"),
+            edge: s.get("Edge").map(str::to_owned),
+            allies: s.get("Allies").map_or_else(Vec::new, |a| {
+                a.split([',', ' ', '\t'])
+                    .filter(|t| !t.is_empty())
+                    .map(str::to_owned)
+                    .collect()
+            }),
+            max_unit: s.get_int("MaxUnit"),
+            max_building: s.get_int("MaxBuilding"),
+            max_infantry: s.get_int("MaxInfantry"),
+            max_vessel: s.get_int("MaxVessel"),
+            tech_level: s.get_int("TechLevel"),
+            iq: s.get_int("IQ"),
+            player_control: s.get_bool("PlayerControl"),
+        }
+    }
+}
+
+/// Reads the sections of the houses in `houses` that are present.
+pub fn read_houses<H: Ord + Copy + Display>(
+    ini: &crate::ini::Ini,
+    houses: &[H],
+) -> BTreeMap<H, HouseSettings> {
+    houses
+        .iter()
+        .filter_map(|&h| Some((h, HouseSettings::read(ini.section(&h.to_string())?))))
+        .collect()
+}
+
+/// `[Base]`: the buildings the AI rebuilds, in order (`BaseClass::Read_INI`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Base<H, B> {
+    /// `Player`: the house that owns the base.
+    pub house: Option<H>,
+    /// Building types and cells, from `000=Type,Cell` up to `Count`.
+    pub nodes: Vec<(B, u16)>,
+}
+
+impl<H: FromStr, B: FromStr> Base<H, B> {
+    /// Reads `[Base]`; unknown building types are skipped.
+    #[must_use]
+    pub fn read(section: Option<&Section>) -> Self {
+        let Some(s) = section else {
+            return Self {
+                house: None,
+                nodes: Vec::new(),
+            };
+        };
+        let count = s.get_int("Count").unwrap_or(0).max(0);
+        let nodes = (0..count)
+            .filter_map(|i| {
+                let mut t = tokens(s.get(&format!("{i:03}"))?);
+                let kind = t.next()?.parse().ok()?;
+                Some((kind, number(t.next()) as u16))
+            })
+            .collect();
+        Self {
+            house: s.get("Player").and_then(|h| h.parse().ok()),
+            nodes,
+        }
+    }
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use super::*;
+    use crate::ini::Ini;
+
+    #[test]
+    fn basic_houses_and_base() {
+        let ini = Ini::parse(
+            "[Basic]\nName=Test\nIntro=x\nBrief=GDI1\nPlayer=GoodGuy\nEndOfGame=no\n\
+             [GoodGuy]\nCredits=50\nAllies=GoodGuy, Neutral\nEdge=North\n\
+             [Base]\nPlayer=BadGuy\nCount=2\n000=HAND,100\n001=NUKE,200\n",
+        );
+        let basic = Basic::read(ini.section("BASIC"));
+        assert_eq!(basic.name.as_deref(), Some("Test"));
+        assert_eq!(basic.movies.get("Brief").map(String::as_str), Some("GDI1"));
+        assert!(!basic.movies.contains_key("Intro"));
+        assert_eq!(basic.flags.get("EndOfGame"), Some(&false));
+
+        let houses = read_houses(&ini, &["GoodGuy", "BadGuy"]);
+        let good = &houses["GoodGuy"];
+        assert_eq!(
+            (good.credits, good.edge.as_deref()),
+            (Some(50), Some("North"))
+        );
+        assert_eq!(good.allies, ["GoodGuy", "Neutral"]);
+        assert!(!houses.contains_key("BadGuy"));
+
+        let base = Base::<String, String>::read(ini.section("Base"));
+        assert_eq!(base.house.as_deref(), Some("BadGuy"));
+        assert_eq!(base.nodes, [("HAND".into(), 100), ("NUKE".into(), 200)]);
+    }
+}

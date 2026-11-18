@@ -73,9 +73,9 @@ Next, roughly in dependency order:
 2. **Built-in type data**: the constructor values in the `*DATA.CPP` tables. Tiberian
    Dawn has no rules file, so all its stats live there; Red Alert uses them as defaults
    under `RULES.INI`.
-3. **Rest of scenario loading**: `[Basic]`, house sections (credits, allies, edges),
-   `[Base]`, briefings, RA's pre-2 trigger/team formats, and names for trigger events,
-   actions and team missions.
+3. **Rest of scenario loading**: briefings, RA's pre-2 trigger/team formats, and names
+   for trigger events, actions and team missions. (`[Basic]`, house sections and
+   `[Base]` have typed read-only views in `cnc_core::scenario`.)
 4. **Simulation core**: `MAP`/`CELL`, `OBJECT` → `TECHNO` → `FOOT` → unit classes,
    `FINDPATH.CPP`, `COMBAT.CPP`, `BULLET`, `ANIM`, `HOUSE`, `FACTORY`, `LOGIC.CPP`.
    This is the bulk of the work, and replacing the C++ class hierarchy and its global

@@ -351,6 +351,22 @@ fn tiberian_dawn_scenario_objects_and_scripting() {
                 };
                 let ini = Ini::parse(&String::from_utf8_lossy(&text));
 
+                let basic = cnc_core::scenario::Basic::read(ini.section("Basic"));
+                assert!(basic.player.is_some(), "{stem}: no player");
+                assert!(
+                    !cnc_core::scenario::read_houses(&ini, cnc_td::House::ALL).is_empty(),
+                    "{stem}: no houses"
+                );
+                let base = cnc_core::scenario::Base::<cnc_td::House, cnc_td::BuildingType>::read(
+                    ini.section("Base"),
+                );
+                let base_count = ini.get_int("Base", "Count").unwrap_or(0);
+                assert_eq!(
+                    base.nodes.len() as i32,
+                    base_count.max(0),
+                    "{stem}: base nodes"
+                );
+
                 let parsed = cnc_td::scenario::Objects::read_ini(&ini);
                 let count = parsed.units.len()
                     + parsed.aircraft.len()
@@ -430,6 +446,21 @@ fn red_alert_campaign_scenarios() {
                 assert_eq!(again, scenario, "{stem}: map round trip");
 
                 let ini = Ini::parse(&text);
+                let basic = cnc_core::scenario::Basic::read(ini.section("Basic"));
+                assert!(
+                    basic.player.is_some() && basic.new_ini_format >= Some(2),
+                    "{stem}: [Basic]"
+                );
+                let base = cnc_core::scenario::Base::<cnc_ra::House, cnc_ra::BuildingType>::read(
+                    ini.section("Base"),
+                );
+                let base_count = ini.get_int("Base", "Count").unwrap_or(0);
+                assert_eq!(
+                    base.nodes.len() as i32,
+                    base_count.max(0),
+                    "{stem}: base nodes"
+                );
+
                 let parsed = cnc_ra::scenario::Objects::read_ini(&ini);
                 let count = parsed.units.len()
                     + parsed.ships.len()
