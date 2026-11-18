@@ -338,6 +338,7 @@ fn entry_count(ini: &Ini, sections: &[&str]) -> usize {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn tiberian_dawn_scenario_objects_and_scripting() {
     let Some(root) = root() else { return };
     let mut general = open_mix(&cncdata(&root, "TIBERIAN_DAWN/CD1/GENERAL.MIX"));
@@ -422,6 +423,7 @@ fn tiberian_dawn_scenario_objects_and_scripting() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn red_alert_campaign_scenarios() {
     let Some(root) = root() else { return };
     let Some(mut main) = ra_main(&root) else {
