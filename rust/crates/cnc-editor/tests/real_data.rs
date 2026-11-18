@@ -157,6 +157,61 @@ fn red_alert_encrypted_mixes_and_rules() {
         "RULES.INI lacks base-game units: {missing:?}"
     );
     println!("RULES.INI: {} sections", rules.sections().len());
+
+    // Typed rules: everything the base game builds has stats, and every weapon, warhead
+    // and projectile it refers to is defined.
+    let mut typed = cnc_ra::rules::Rules::from_ini(&rules);
+    assert_eq!(
+        typed.global.gold_value,
+        rules.get_int("General", "GoldValue").expect("GoldValue")
+    );
+    for (unit, stats) in &typed.units {
+        assert!(stats.techno.strength > 0, "{unit} has no strength");
+        for weapon in [stats.techno.primary, stats.techno.secondary]
+            .into_iter()
+            .flatten()
+        {
+            let w = typed
+                .weapons
+                .get(&weapon)
+                .unwrap_or_else(|| panic!("{unit}: {weapon} undefined"));
+            if let Some(warhead) = w.warhead {
+                assert!(
+                    typed.warheads.contains_key(&warhead),
+                    "{weapon}: {warhead} undefined"
+                );
+            }
+            if let Some(projectile) = w.projectile {
+                assert!(
+                    typed.projectiles.contains_key(&projectile),
+                    "{weapon}: {projectile} undefined"
+                );
+            }
+        }
+    }
+    assert!(
+        typed.buildings.values().any(|b| b.power > 0)
+            && typed.buildings.values().any(|b| b.drain > 0)
+    );
+    println!(
+        "typed rules: {} units, {} infantry, {} vessels, {} aircraft, {} buildings, {} weapons",
+        typed.units.len(),
+        typed.infantry.len(),
+        typed.vessels.len(),
+        typed.aircraft.len(),
+        typed.buildings.len(),
+        typed.weapons.len()
+    );
+
+    // AFTRMATH.INI layers the expansion units on top.
+    let mut expand2 = open_mix(&cd1.join("EXPAND2.MIX"));
+    if let Some(aftermath) = expand2.read("AFTRMATH.INI").expect("io") {
+        let before = typed.units.len();
+        typed.apply(&Ini::parse(&String::from_utf8_lossy(&aftermath)));
+        assert!(typed.units.len() > before, "AFTRMATH.INI added no units");
+        assert!(typed.aftermath.new_units_enabled || typed.aftermath.mtank_distance > 0);
+        println!("after AFTRMATH.INI: {} units", typed.units.len());
+    }
 }
 
 #[test]

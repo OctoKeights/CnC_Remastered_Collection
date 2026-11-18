@@ -34,7 +34,7 @@ allowed, wrapping these safe crates.
 |---|---|
 | `cnc-core` | Shared by everything: CRC, LCW, Base64, MIX, MEG, INI, packed INI sections, `[Map]`, fixed point, RNGs, coordinates/cells/facings, the `named_enum!` macro |
 | `cnc-td` | Tiberian Dawn: theaters, houses, generated object types, `.BIN` template maps |
-| `cnc-ra` | Red Alert: theaters, houses, generated object types (incl. vessels), `[MapPack]` / `[OverlayPack]` |
+| `cnc-ra` | Red Alert: theaters, houses, generated object types (incl. vessels), `[MapPack]` / `[OverlayPack]`, typed `RULES.INI` / `AFTRMATH.INI` |
 | `cnc-assets` | Palettes, SHP keyframe shapes, terrain icon sets (both games' layouts), AUD audio (SOS ADPCM and Westwood codecs) with WAV export |
 | `cnc-editor` | Editor model: `CellMetrics`, `CellGrid`, `Scenario` load/save for both games |
 
@@ -54,6 +54,10 @@ Done (with tests):
 - [x] `COORDINATE`/`CELL` helpers, `Distance`, `Desired_Facing8/256`, adjacency tables
 - [x] Object type enums for both games, cross-checked against the editor's own tables
 - [x] Scenario map layers for both games, round-tripping through text
+- [x] RA rules: the 171 global settings generated from `RULES.H`/`RULES.CPP` by
+      `tools/gen_ra_rules.py` (with the header comments as docs), plus land types,
+      power-ups, missions, house biases and per-object stats for units, infantry,
+      ships, aircraft, buildings, weapons, warheads and projectiles
 - [x] Palettes (`.PAL`), SHP shapes (`KEYFRAME.CPP`, `XORDELTA.ASM`), terrain icon sets
       (`ICONSET.CPP`), AUD audio (`ADPCM.CPP` tables; the type-1 Westwood codec from its
       public description, since its decoder isn't in the release)
@@ -62,8 +66,9 @@ Next, roughly in dependency order:
 
 1. **Remaining assets**: VQA video (its codec isn't in the release), WSA animations,
    fonts, Remastered TGA/ZIP art via MEG.
-2. **Rules and type data**: the `*DATA.CPP` tables as data, `RULES.CPP` / `RULES.INI`
-   (RA), `TechnoTypeClass` hierarchy as traits/structs.
+2. **Built-in type data**: the constructor values in the `*DATA.CPP` tables. Tiberian
+   Dawn has no rules file, so all its stats live there; Red Alert uses them as defaults
+   under `RULES.INI`.
 3. **Scenario loading**: `SCENARIO.CPP`, `IOMAP.CPP`, `IOOBJ.CPP`, houses, teams,
    triggers (`TRIGGER`, `TEAMTYPE`, RA `TEVENT`/`TACTION`).
 4. **Simulation core**: `MAP`/`CELL`, `OBJECT` → `TECHNO` → `FOOT` → unit classes,

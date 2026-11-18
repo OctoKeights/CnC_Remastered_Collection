@@ -4,6 +4,7 @@
 //! itself is still to be ported (see `rust/PORTING.md`).
 
 pub mod map;
+pub mod rules;
 pub mod types;
 
 pub use types::{
