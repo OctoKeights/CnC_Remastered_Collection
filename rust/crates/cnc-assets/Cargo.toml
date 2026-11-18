@@ -1,0 +1,18 @@
+[package]
+name = "cnc-assets"
+description = "Art and sound formats for the Rust port of the C&C Remastered Collection: palettes, SHP shapes, icon sets and AUD audio."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cnc-core.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+cnc-td.workspace = true
+cnc-ra.workspace = true

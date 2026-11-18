@@ -31,5 +31,6 @@ jobs:
         run: |
           python3 tools/gen_types.py
           python3 tools/gen_blowfish.py
+          python3 tools/gen_adpcm.py
           cargo fmt --all
           git diff --exit-code -- crates/

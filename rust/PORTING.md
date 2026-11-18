@@ -35,6 +35,7 @@ allowed, wrapping these safe crates.
 | `cnc-core` | Shared by everything: CRC, LCW, Base64, MIX, MEG, INI, packed INI sections, `[Map]`, fixed point, RNGs, coordinates/cells/facings, the `named_enum!` macro |
 | `cnc-td` | Tiberian Dawn: theaters, houses, generated object types, `.BIN` template maps |
 | `cnc-ra` | Red Alert: theaters, houses, generated object types (incl. vessels), `[MapPack]` / `[OverlayPack]` |
+| `cnc-assets` | Palettes, SHP keyframe shapes, terrain icon sets (both games' layouts), AUD audio (SOS ADPCM and Westwood codecs) with WAV export |
 | `cnc-editor` | Editor model: `CellMetrics`, `CellGrid`, `Scenario` load/save for both games |
 
 ## Status
@@ -53,11 +54,14 @@ Done (with tests):
 - [x] `COORDINATE`/`CELL` helpers, `Distance`, `Desired_Facing8/256`, adjacency tables
 - [x] Object type enums for both games, cross-checked against the editor's own tables
 - [x] Scenario map layers for both games, round-tripping through text
+- [x] Palettes (`.PAL`), SHP shapes (`KEYFRAME.CPP`, `XORDELTA.ASM`), terrain icon sets
+      (`ICONSET.CPP`), AUD audio (`ADPCM.CPP` tables; the type-1 Westwood codec from its
+      public description, since its decoder isn't in the release)
 
 Next, roughly in dependency order:
 
-1. **Assets**: `SHP` shapes (`KEYFRAME.CPP`), palettes, icon sets/templates (`ICONSET`),
-   `AUD` audio (`ADPCM.CPP`), VQA video. Remastered TGA/ZIP art via MEG.
+1. **Remaining assets**: VQA video (its codec isn't in the release), WSA animations,
+   fonts, Remastered TGA/ZIP art via MEG.
 2. **Rules and type data**: the `*DATA.CPP` tables as data, `RULES.CPP` / `RULES.INI`
    (RA), `TechnoTypeClass` hierarchy as traits/structs.
 3. **Scenario loading**: `SCENARIO.CPP`, `IOMAP.CPP`, `IOOBJ.CPP`, houses, teams,
@@ -87,8 +91,14 @@ CNC_REMASTERED_DIR="C:/Program Files (x86)/Steam/steamapps/common/CnCRemastered"
     cargo test -p cnc-editor --test real_data -- --nocapture
 ```
 
+`crates/cnc-assets/tests/real_data.rs` does the same for art and sound: every TD object
+shape, every template in the three TD theaters, all TD sounds, and RA palettes and
+interface shapes from the nested archives.
+
 Findings from the real data so far: the game writes clear `.BIN` cells as `255, 0` (the
-editor wrote `255, 255`), and `RULES.INI` doesn't define the Aftermath units or the ants.
+editor wrote `255, 255`), `RULES.INI` doesn't define the Aftermath units or the ants, some SOS-compressed sounds
+declare one more sample in their final chunk than they contain, and some Remastered
+`.SHP` files are 0x0 stubs (e.g. RA `SIDEBAR.SHP`).
 
 ## Building
 

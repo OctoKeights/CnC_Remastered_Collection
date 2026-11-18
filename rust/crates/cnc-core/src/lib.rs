@@ -20,6 +20,7 @@
 //! | [`geometry`] | `FUNCTION.H` inlines, `COORD.CPP`, facing routines in `MiscAsm.cpp` |
 
 pub mod base64;
+pub mod bytes;
 pub mod crc;
 pub mod crypto;
 pub mod fixed;
@@ -32,7 +33,5 @@ pub mod mix;
 pub mod named;
 pub mod pack;
 pub mod random;
-
-mod bytes;
 
 pub use fixed::Fixed;
