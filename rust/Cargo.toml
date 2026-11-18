@@ -13,7 +13,6 @@ repository = "https://github.com/OctoKeights/CnC_Remastered_Collection"
 cnc-core = { path = "crates/cnc-core" }
 cnc-td = { path = "crates/cnc-td" }
 cnc-ra = { path = "crates/cnc-ra" }
-cnc-assets = { path = "crates/cnc-assets" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

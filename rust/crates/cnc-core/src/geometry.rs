@@ -109,8 +109,8 @@ impl Coord {
     /// The midpoint, treating halves as unsigned (`Coord_Mid`).
     #[must_use]
     pub const fn midpoint(self, other: Self) -> Self {
-        let x = ((self.0 & 0xFFFF) + (other.0 & 0xFFFF)) >> 1;
-        let y = ((self.0 >> 16) + (other.0 >> 16)) >> 1;
+        let x = u32::midpoint(self.0 & 0xFFFF, other.0 & 0xFFFF);
+        let y = u32::midpoint(self.0 >> 16, other.0 >> 16);
         Self((y << 16) | x)
     }
 
