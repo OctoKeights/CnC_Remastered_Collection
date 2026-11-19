@@ -26,6 +26,7 @@ pub mod crc;
 pub mod crypto;
 pub mod fixed;
 pub mod geometry;
+pub mod heap;
 pub mod ini;
 pub mod lcw;
 pub mod map;
@@ -35,5 +36,6 @@ pub mod named;
 pub mod pack;
 pub mod random;
 pub mod scenario;
+pub mod state_hash;
 
 pub use fixed::Fixed;
