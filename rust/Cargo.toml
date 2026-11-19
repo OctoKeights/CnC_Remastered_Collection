@@ -13,6 +13,8 @@ repository = "https://github.com/OctoKeights/CnC_Remastered_Collection"
 cnc-core = { path = "crates/cnc-core" }
 cnc-td = { path = "crates/cnc-td" }
 cnc-ra = { path = "crates/cnc-ra" }
+cnc-sim = { path = "crates/cnc-sim" }
+bevy_ecs = { version = "0.20", default-features = false, features = ["std", "multi_threaded"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

@@ -134,6 +134,41 @@ impl Lcg {
     }
 }
 
+/// The Microsoft C runtime's `rand()`, which the Remastered DLLs (MSVC builds) call
+/// directly in a few places that affect the game state: Tiberian Dawn mixes a draw into
+/// every frame's sync CRC (`Compute_Game_CRC` in `QUEUE.CPP`) and uses it when units
+/// scatter (`UNIT.CPP`).
+///
+/// The default seed is 1, as if `srand` had never been called.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CrtRand {
+    /// The generator state (`srand`'s argument after seeding).
+    pub seed: u32,
+}
+
+impl Default for CrtRand {
+    fn default() -> Self {
+        Self::new(1)
+    }
+}
+
+impl CrtRand {
+    /// `RAND_MAX`.
+    pub const MAX: u32 = 0x7FFF;
+
+    /// Creates a generator as `srand(seed)` would.
+    #[must_use]
+    pub const fn new(seed: u32) -> Self {
+        Self { seed }
+    }
+
+    /// Returns the next value, 0..=[`Self::MAX`].
+    pub fn next_u15(&mut self) -> u32 {
+        self.seed = self.seed.wrapping_mul(214_013).wrapping_add(2_531_011);
+        (self.seed >> 16) & Self::MAX
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,6 +217,16 @@ mod tests {
             let v = rng.range(9, -3);
             assert!((-3..=9).contains(&v));
         }
+    }
+
+    #[test]
+    fn crt_rand_matches_msvc() {
+        // The well-known first outputs of MSVC's rand() with the default seed.
+        let mut rng = CrtRand::default();
+        assert_eq!(
+            [rng.next_u15(), rng.next_u15(), rng.next_u15()],
+            [41, 18467, 6334]
+        );
     }
 
     #[test]

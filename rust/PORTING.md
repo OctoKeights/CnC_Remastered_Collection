@@ -15,7 +15,8 @@ allowed, wrapping these safe crates.
 - `unsafe_code = "forbid"` across the workspace.
 - `cargo fmt --check`, `cargo clippy --all-targets` (pedantic) with `-D warnings`, and
   `cargo test` must pass. CI runs all of them (`.github/workflows/rust.yml`).
-- Standard library only for now.
+- Standard library only, except `cnc-sim`, which is built on Bevy's ECS (`bevy_ecs`, no
+  default features). The front end will add more dependencies.
 - **Simulation code is bit-exact.** Multiplayer lockstep and replays depend on every peer
   computing the same thing, so RNGs, fixed-point maths, facing and distance routines
   reproduce the original integer arithmetic, quirks included. Each such quirk is
@@ -36,6 +37,7 @@ allowed, wrapping these safe crates.
 | `cnc-td` | Tiberian Dawn: theaters, houses, missions, generated object types and built-in stats, `.BIN` template maps, scenario objects, triggers and team types |
 | `cnc-ra` | Red Alert: theaters, houses, generated object types (incl. vessels), `[MapPack]` / `[OverlayPack]`, typed `RULES.INI` / `AFTRMATH.INI`, scenario objects, `[Trigs]` and `[TeamTypes]` |
 | `cnc-assets` | Palettes, SHP keyframe shapes, terrain icon sets (both games' layouts), AUD audio (SOS ADPCM and Westwood codecs) with WAV export |
+| `cnc-sim` | The simulation on `bevy_ecs`: shared object components, the tick schedule (events → logic → sync), the original per-frame sync CRC, single- or multithreaded execution with identical results |
 | `cnc-editor` | Editor model: `CellMetrics`, `CellGrid`, `Scenario` load/save for both games (map layers, objects, waypoints, cell triggers, triggers, team types) |
 
 ## Status
@@ -62,6 +64,10 @@ Done (with tests):
       terrain, smudges, TD overlays, waypoints, cell triggers) with the original line
       formats and `strtok`/`atoi` parsing, plus triggers and team types (TD's name-based
       format; RA's numeric `NewINIFormat` 2+ format)
+- [x] MSVC `rand()` (`CrtRand`), which TD folds into its sync CRC and uses for scattering
+- [x] Simulation skeleton (`cnc-sim`): object components, heap order, the tick schedule,
+      `Compute_Game_CRC`/`Add_CRC`, and tests that single- and multithreaded runs give
+      the same CRC every frame and that unordered conflicting systems are rejected
 - [x] Palettes (`.PAL`), SHP shapes (`KEYFRAME.CPP`, `XORDELTA.ASM`), terrain icon sets
       (`ICONSET.CPP`), AUD audio (`ADPCM.CPP` tables; the type-1 Westwood codec from its
       public description, since its decoder isn't in the release)
@@ -85,8 +91,12 @@ Next, roughly in dependency order:
    `[Base]` have typed read-only views in `cnc_core::scenario`.)
 4. **Simulation core**: `MAP`/`CELL`, `OBJECT` → `TECHNO` → `FOOT` → unit classes,
    `FINDPATH.CPP`, `COMBAT.CPP`, `BULLET`, `ANIM`, `HOUSE`, `FACTORY`, `LOGIC.CPP`.
-   This is the bulk of the work, and replacing the C++ class hierarchy and its global
-   heaps (`HEAP.CPP`) with arenas/ids is the main design decision.
+   This is the bulk of the work. The class hierarchy and global heaps (`HEAP.CPP`) become
+   Bevy ECS entities and components in `cnc-sim`. Determinism rules (see the crate docs):
+   the tick schedule treats any unordered pair of conflicting systems as a build error;
+   order-dependent systems sort by `HeapIndex` (the original heap order); no parallel
+   iteration writes shared state; integer maths only. Renderers (2D now, a 3D mod later)
+   are separate Bevy plugins that only read the simulation's components.
 5. **Lockstep networking and events**: `EVENT.CPP`, `QUEUE.CPP` (the IPX/modem layers are
    obsolete and won't be ported as-is).
 6. **Front end**: rendering, input, sidebar, audio. This needs dependencies (windowing,

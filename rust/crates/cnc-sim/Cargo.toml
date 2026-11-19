@@ -1,0 +1,16 @@
+[package]
+name = "cnc-sim"
+description = "Deterministic, renderer-agnostic game simulation for the Rust port of the C&C Remastered Collection, built on Bevy's ECS."
+version.workspace = true
+edition.workspace = true
+# bevy_ecs 0.20 needs a newer compiler than the rest of the workspace.
+rust-version = "1.95"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+bevy_ecs.workspace = true
+cnc-core.workspace = true
+
+[lints]
+workspace = true
