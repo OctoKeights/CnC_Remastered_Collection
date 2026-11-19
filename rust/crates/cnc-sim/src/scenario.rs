@@ -110,14 +110,13 @@ fn read_bin(
     icon_exists: Option<IconCheck<'_>>,
     report: &mut MapLoadReport,
 ) {
-    for (index, pair) in (0_u16..).zip(bin.chunks_exact(2).take(MAP_CELLS)) {
+    for (index, &[id, icon]) in (0_u16..).zip(bin.as_chunks::<2>().0.iter().take(MAP_CELLS)) {
         let cell = Cell::from_index(index);
         // 255 is TEMPLATE_NONE; ids past the table would be out of bounds in the
         // original, so they count as none too.
-        let Some(template) = TemplateType::from_id(pair[0]) else {
+        let Some(template) = TemplateType::from_id(id) else {
             continue;
         };
-        let icon = pair[1];
         let valid = template == TemplateType::Clear1
             || icon_exists.is_none_or(|exists| exists(template, icon));
         if valid {
