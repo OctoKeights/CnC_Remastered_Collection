@@ -10,6 +10,7 @@ repository.workspace = true
 
 [dependencies]
 bevy_ecs.workspace = true
+bevy_tasks.workspace = true
 cnc-core.workspace = true
 
 [lints]

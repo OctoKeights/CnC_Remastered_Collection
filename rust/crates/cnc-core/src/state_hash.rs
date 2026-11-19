@@ -118,11 +118,58 @@ impl<T: StateHash + ?Sized> StateHash for &T {
     }
 }
 
-impl<A: StateHash, B: StateHash> StateHash for (A, B) {
+macro_rules! tuples {
+    ($(($($name:ident $index:tt),+))*) => {$(
+        impl<$($name: StateHash),+> StateHash for ($($name,)+) {
+            fn state_hash(&self, hasher: &mut StateHasher) {
+                $(self.$index.state_hash(hasher);)+
+            }
+        }
+    )*};
+}
+tuples! {
+    (A 0, B 1)
+    (A 0, B 1, C 2)
+    (A 0, B 1, C 2, D 3)
+    (A 0, B 1, C 2, D 3, E 4)
+}
+
+impl StateHash for () {
+    fn state_hash(&self, _hasher: &mut StateHasher) {}
+}
+
+impl StateHash for str {
     fn state_hash(&self, hasher: &mut StateHasher) {
-        self.0.state_hash(hasher);
-        self.1.state_hash(hasher);
+        self.as_bytes().state_hash(hasher);
     }
+}
+
+/// Implements [`StateHash`] for a struct by hashing the listed fields in order.
+///
+/// ```
+/// use cnc_core::impl_state_hash;
+/// use cnc_core::state_hash::hash_of;
+///
+/// struct Tank {
+///     strength: u16,
+///     ammo: i8,
+///     selected: bool, // UI state: deliberately left out
+/// }
+/// impl_state_hash!(Tank { strength, ammo });
+///
+/// let a = Tank { strength: 400, ammo: -1, selected: false };
+/// let b = Tank { strength: 400, ammo: -1, selected: true };
+/// assert_eq!(hash_of(&a), hash_of(&b));
+/// ```
+#[macro_export]
+macro_rules! impl_state_hash {
+    ($ty:ty { $($field:ident),* $(,)? }) => {
+        impl $crate::state_hash::StateHash for $ty {
+            fn state_hash(&self, hasher: &mut $crate::state_hash::StateHasher) {
+                $($crate::state_hash::StateHash::state_hash(&self.$field, hasher);)*
+            }
+        }
+    };
 }
 
 impl StateHash for Fixed {
@@ -153,6 +200,25 @@ impl StateHash for crate::heap::SlotId {
 impl StateHash for crate::random::SimRandom {
     fn state_hash(&self, hasher: &mut StateHasher) {
         self.index().state_hash(hasher);
+    }
+}
+
+impl StateHash for crate::random::CrtRand {
+    fn state_hash(&self, hasher: &mut StateHasher) {
+        self.seed.state_hash(hasher);
+    }
+}
+
+impl<T: StateHash> StateHash for crate::heap::ObjectHeap<T> {
+    /// Hashes the live objects with their ids, in the order the game processes them.
+    fn state_hash(&self, hasher: &mut StateHasher) {
+        u64::try_from(self.len())
+            .unwrap_or(u64::MAX)
+            .state_hash(hasher);
+        for (id, value) in self.iter() {
+            id.state_hash(hasher);
+            value.state_hash(hasher);
+        }
     }
 }
 
@@ -202,5 +268,22 @@ mod tests {
         assert_ne!(hash_of(&split_a), hash_of(&split_b));
         assert_ne!(hash_of(&None::<u8>), hash_of(&Some(0_u8)));
         assert_eq!(hash_of(&Coord::from_raw(5)), hash_of(&5_u32));
+        assert_ne!(hash_of("ab"), hash_of("ba"));
+    }
+
+    #[test]
+    fn heaps_hash_in_processing_order() {
+        use crate::heap::ObjectHeap;
+        let mut a = ObjectHeap::new(4);
+        let first = a.insert(1_u8).expect("free slot");
+        a.insert(2).expect("free slot");
+        a.remove(first);
+        a.insert(3).expect("free slot");
+        // Same values and slots, different creation order.
+        let mut b = ObjectHeap::new(4);
+        b.insert(3_u8).expect("free slot");
+        b.insert(2).expect("free slot");
+        assert_ne!(hash_of(&a), hash_of(&b));
+        assert_eq!(hash_of(&a), hash_of(&a.clone()));
     }
 }

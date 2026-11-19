@@ -1,18 +1,26 @@
 //! The tick schedule and the [`Simulation`] that owns it.
 
+use std::collections::VecDeque;
+
+use bevy_ecs::component::Component;
 use bevy_ecs::entity::Entity;
+use bevy_ecs::resource::Resource;
 use bevy_ecs::schedule::{
     IntoScheduleConfigs, LogLevel, MultiThreadedExecutor, Schedule, ScheduleBuildError,
     ScheduleBuildSettings, ScheduleLabel, SingleThreadedExecutor, SystemSet,
 };
 use bevy_ecs::system::{ResMut, ScheduleSystem};
 use bevy_ecs::world::World;
+use bevy_tasks::{ComputeTaskPool, TaskPool};
 use cnc_core::geometry::{Coord, Dir};
+use cnc_core::state_hash::StateHash;
+use cnc_core::sync::{StateDigest, SyncCheck, SyncHistory};
 
 use crate::components::{
     HeapIndex, HouseId, Kind, Position, PrimaryFacing, SecondaryFacing, Strength,
 };
 use crate::crc::compute_game_crc;
+use crate::digest::{SectionFn, core_sections, hash_component, hash_resource};
 use crate::resources::{CrtRng, Frame, GameCrc, NextHeapIndex, SimRng};
 
 /// The schedule run once per game frame.
@@ -57,16 +65,34 @@ pub struct ObjectSpawn {
     pub strength: u16,
 }
 
+/// How many frames of sync CRCs a [`Simulation`] remembers by default, enough to check
+/// peers' reports across a long network delay.
+pub const DEFAULT_SYNC_HISTORY: usize = 256;
+
 /// A running game: the ECS world and the tick schedule.
 pub struct Simulation {
     world: World,
     tick: Schedule,
+    sections: Vec<(&'static str, SectionFn)>,
+    crc_history: SyncHistory,
+    digest_log: DigestLog,
+}
+
+/// Full digests kept every `every` frames, for comparing with a peer after a desync.
+#[derive(Debug, Clone, Default)]
+struct DigestLog {
+    every: u32,
+    keep: usize,
+    digests: VecDeque<(u32, StateDigest)>,
 }
 
 impl Simulation {
     /// Creates an empty game with the core systems in place.
     #[must_use]
     pub fn new(threading: Threading) -> Self {
+        // Systems may use `par_iter`, which needs the compute pool even when the schedule
+        // itself runs single-threaded.
+        ComputeTaskPool::get_or_init(TaskPool::default);
         let mut world = World::new();
         world.init_resource::<Frame>();
         world.init_resource::<SimRng>();
@@ -90,7 +116,13 @@ impl Simulation {
                 .in_set(Phase::Sync),
         );
 
-        Self { world, tick }
+        Self {
+            world,
+            tick,
+            sections: core_sections(),
+            crc_history: SyncHistory::new(DEFAULT_SYNC_HISTORY),
+            digest_log: DigestLog::default(),
+        }
     }
 
     /// Adds game systems to a phase.
@@ -143,13 +175,88 @@ impl Simulation {
 
     /// Runs one frame and returns its sync CRC.
     ///
+    /// The CRC is recorded in the sync history under the frame just simulated, as is a
+    /// full digest if [`record_digests`](Self::record_digests) asked for one.
+    ///
     /// # Errors
     ///
     /// As for [`build`](Self::build); nothing is run if the schedule is invalid.
     pub fn step(&mut self) -> Result<u32, ScheduleBuildError> {
         self.build()?;
+        let frame = self.frame();
         self.tick.run(&mut self.world);
-        Ok(self.crc())
+        let crc = self.crc();
+        self.crc_history.record(frame, u64::from(crc));
+        let log = &self.digest_log;
+        if log.every != 0 && frame.is_multiple_of(log.every) {
+            let digest = self.digest();
+            let log = &mut self.digest_log;
+            if log.digests.len() == log.keep {
+                log.digests.pop_front();
+            }
+            log.digests.push_back((frame, digest));
+        }
+        Ok(crc)
+    }
+
+    /// Includes component `C` in [`digest`](Self::digest)s, as a section called `name`.
+    ///
+    /// Every component that is part of the game state should be registered, so a
+    /// divergence in it is reported by name.
+    pub fn hash_component<C: Component + StateHash>(&mut self, name: &'static str) -> &mut Self {
+        self.sections.push((name, hash_component::<C>));
+        self
+    }
+
+    /// Includes resource `R` in [`digest`](Self::digest)s, as a section called `name`.
+    pub fn hash_resource<R: Resource + StateHash>(&mut self, name: &'static str) -> &mut Self {
+        self.sections.push((name, hash_resource::<R>));
+        self
+    }
+
+    /// Hashes the whole registered state, one section per component or resource.
+    ///
+    /// Comparing two peers' digests with [`StateDigest::differences`] names the parts that
+    /// diverged. This walks every object, so it's for diagnosis, not every frame.
+    pub fn digest(&mut self) -> StateDigest {
+        let mut builder = StateDigest::builder();
+        for &(name, fill) in &self.sections {
+            builder.section(name, |hasher| fill(&mut self.world, hasher));
+        }
+        builder.build()
+    }
+
+    /// Keeps a full [`digest`](Self::digest) of every `every`th frame (0 turns this off),
+    /// remembering the last `keep` of them.
+    pub fn record_digests(&mut self, every: u32, keep: usize) {
+        self.digest_log = DigestLog {
+            every,
+            keep: keep.max(1),
+            digests: VecDeque::new(),
+        };
+    }
+
+    /// The digest recorded for `frame`, if [`record_digests`](Self::record_digests) kept
+    /// one.
+    #[must_use]
+    pub fn digest_at(&self, frame: u32) -> Option<&StateDigest> {
+        self.digest_log
+            .digests
+            .iter()
+            .find(|(f, _)| *f == frame)
+            .map(|(_, digest)| digest)
+    }
+
+    /// The sync CRCs of recent frames.
+    #[must_use]
+    pub fn sync_history(&self) -> &SyncHistory {
+        &self.crc_history
+    }
+
+    /// Checks a peer's sync CRC for `frame` against ours.
+    #[must_use]
+    pub fn check_peer(&self, frame: u32, crc: u32) -> SyncCheck {
+        self.crc_history.check(frame, u64::from(crc))
     }
 
     /// The current frame number.

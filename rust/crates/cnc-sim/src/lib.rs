@@ -25,17 +25,26 @@
 //!    [`cnc_core::fixed`] and [`cnc_core::geometry`].
 //!
 //! The per-tick sync check is the original's (`Compute_Game_CRC` in `QUEUE.CPP`), so a
-//! desync shows up on the frame it happens.
+//! desync shows up on the frame it happens; [`Simulation::check_peer`] compares a peer's
+//! CRC against the recorded history. To find *what* diverged, [`Simulation::digest`]
+//! hashes every registered component and resource as a separate named section, and
+//! [`StateDigest::differences`] lists the sections two peers disagree on.
+//!
+//! Parallel systems that need to change shared state record the changes in a
+//! [`cnc_core::deferred::Deferred`] buffer keyed by heap order, then apply them in a
+//! later, serial system.
 
 pub mod components;
 pub mod crc;
+mod digest;
 pub mod resources;
 mod simulation;
 
 pub use bevy_ecs;
 pub use cnc_core::geometry::{Coord, Dir};
+pub use cnc_core::sync::{StateDigest, SyncCheck, SyncHistory};
 pub use components::{
     HeapIndex, HouseId, Kind, Position, PrimaryFacing, SecondaryFacing, Strength,
 };
 pub use resources::{CrtRng, Frame, GameCrc, SimRng};
-pub use simulation::{ObjectSpawn, Phase, Simulation, Threading, Tick};
+pub use simulation::{DEFAULT_SYNC_HISTORY, ObjectSpawn, Phase, Simulation, Threading, Tick};

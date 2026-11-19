@@ -24,6 +24,7 @@ pub mod base64;
 pub mod bytes;
 pub mod crc;
 pub mod crypto;
+pub mod deferred;
 pub mod fixed;
 pub mod geometry;
 pub mod heap;
@@ -37,5 +38,6 @@ pub mod pack;
 pub mod random;
 pub mod scenario;
 pub mod state_hash;
+pub mod sync;
 
 pub use fixed::Fixed;
