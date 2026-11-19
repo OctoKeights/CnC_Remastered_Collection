@@ -309,7 +309,9 @@ version = "0.1.0"
 dependencies = [
  "bevy_ecs",
  "bevy_tasks",
+ "cnc-assets",
  "cnc-core",
+ "cnc-td",
 ]
 
 [[package]]

@@ -167,11 +167,59 @@ impl CrtRand {
         self.seed = self.seed.wrapping_mul(214_013).wrapping_add(2_531_011);
         (self.seed >> 16) & Self::MAX
     }
+
+    /// A value in `min..=max` drawn as Westwood's library does (`IRandom` in
+    /// `IRANDOM.CPP`, which `Random_Pick` calls): mask `rand()` to the smallest all-ones
+    /// value covering the span and redraw until it fits. Swapped bounds are put right.
+    ///
+    /// Quirk kept: for an empty span (`min == max`) `Get_Random_Mask` returns 1, not 0,
+    /// so draws repeat until one is even.
+    pub fn irandom(&mut self, min: i32, max: i32) -> i32 {
+        let (min, max) = if min > max { (max, min) } else { (min, max) };
+        let span = max.wrapping_sub(min);
+        // `bsr` + shift: all ones up to the span's top bit; 1 when the span is 0.
+        let mask = if span == 0 {
+            1
+        } else {
+            u32::MAX >> (span as u32).leading_zeros()
+        };
+        loop {
+            let num = ((self.next_u15() & mask) as i32).wrapping_add(min);
+            if num <= max {
+                return num;
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn irandom_masks_and_redraws() {
+        let mut rng = CrtRand::default();
+        let mut reference = CrtRand::default();
+        for _ in 0..200 {
+            let v = rng.irandom(6, 17);
+            assert!((6..=17).contains(&v));
+            // Same result by hand: mask 0xF (span 11), redraw past 17.
+            let expected = loop {
+                let n = (reference.next_u15() & 0xF) as i32 + 6;
+                if n <= 17 {
+                    break n;
+                }
+            };
+            assert_eq!(v, expected);
+        }
+        assert_eq!(rng.irandom(17, 6), reference.irandom(6, 17));
+        // An empty span redraws until `rand() & 1` is 0.
+        let mut a = CrtRand::new(7);
+        let mut b = CrtRand::new(7);
+        assert_eq!(a.irandom(5, 5), 5);
+        while b.next_u15() & 1 != 0 {}
+        assert_eq!(a, b);
+    }
 
     #[test]
     fn sim_table_is_a_permutation() {

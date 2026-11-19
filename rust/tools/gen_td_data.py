@@ -144,7 +144,8 @@ def parse_enum(cname):
 ENUMS = {}
 for cname in ["HousesType", "StructType", "UnitType", "InfantryType", "AircraftType", "WeaponType",
               "WarheadType", "BulletType", "ArmorType", "SpeedType", "AnimType", "VocType", "RTTIType",
-              "BSizeType", "DirType", "MissionType", "MPHType"]:
+              "BSizeType", "DirType", "MissionType", "MPHType", "TheaterType", "LandType", "TemplateType",
+              "OverlayType", "TerrainType"]:
     ENUMS[cname] = parse_enum(cname)
 for ident, value in ENUMS["StructType"]:
     if value >= 0:
@@ -153,7 +154,7 @@ CONSTS["STRUCTF_NONE"] = 0
 for ident, value in ENUMS["HousesType"]:
     if value >= 0:
         CONSTS["HOUSEF_" + ident[len("HOUSE_"):]] = 1 << value
-for name, expr in re.findall(r"#define\s+(HOUSEF_\w+|STRUCTF_\w+)\s+(.+)", defines_h):
+for name, expr in re.findall(r"#define\s+(HOUSEF_\w+|STRUCTF_\w+|THEATERF_\w+)\s+(.+)", defines_h):
     try:
         CONSTS[name] = evaluate(expr)
     except ValueError:
@@ -169,9 +170,12 @@ def rust_ident(ident, prefix):
 def real_variants(cname, prefix):
     """Variants worth a Rust name: skip NONE/COUNT/FIRST and aliases of earlier values."""
     seen, out = set(), []
+    count = dict(ENUMS[cname]).get(prefix + "COUNT")
     for ident, value in ENUMS[cname]:
         stem = ident[len(prefix):]
-        if value < 0 or stem in ("COUNT", "FIRST", "MIN", "MAX") or value in seen:
+        # `TEMPLATE_NONE = 255` sits past the count: a sentinel, not a type.
+        past_end = count is not None and value >= count
+        if value < 0 or past_end or stem in ("COUNT", "FIRST", "MIN", "MAX") or value in seen:
             continue
         seen.add(value)
         out.append((ident, value))
@@ -189,6 +193,7 @@ NEW_ENUMS = [
     ("Voc", "VocType", "VOC_", "A sound effect (`VocType`)."),
     ("Rtti", "RTTIType", "RTTI_", "A kind of game object (`RTTIType`)."),
     ("BuildingSize", "BSizeType", "BSIZE_", "A building footprint (`BSizeType`)."),
+    ("Land", "LandType", "LAND_", "A kind of ground (`LandType`)."),
 ]
 
 enums_rs = [
@@ -234,7 +239,8 @@ def existing_variant(enum, cname, prefix, ident):
 def enum_value(rust, cname, prefix, expr, optional):
     ident = expr.strip()
     stem = ident[len(prefix):]
-    if evaluate(ident) < 0:
+    count = dict(ENUMS[cname]).get(prefix + "COUNT")
+    if evaluate(ident) < 0 or (count is not None and evaluate(ident) >= count):
         if not optional:
             raise ValueError(f"{ident} is not allowed here")
         return "None"
@@ -257,6 +263,8 @@ def enum_value(rust, cname, prefix, expr, optional):
 # C++ parameter type -> (Rust type, converter)
 def convert(ctype, pname, expr, lists):
     ctype = " ".join(ctype.split())
+    if pname == "theater":
+        return "u8", f"0x{evaluate(expr):02X}"
     if ctype == "bool":
         return "bool", {"1": "true", "0": "false"}[str(evaluate(expr))]
     if ctype in ("int", "unsigned", "unsigned char", "unsigned short", "long", "unsigned long", "short"):
@@ -286,6 +294,13 @@ def convert(ctype, pname, expr, lists):
         return "Rtti", enum_value("Rtti", "RTTIType", "RTTI_", expr, False)
     if ctype == "BSizeType":
         return "BuildingSize", enum_value("BuildingSize", "BSizeType", "BSIZE_", expr, False)
+    if ctype == "LandType":
+        return "Land", enum_value("Land", "LandType", "LAND_", expr, False)
+    if ctype in ("char const *", "char const*"):
+        name = re.sub(r"\(char const \*\)", "", expr).strip()
+        if name in ("NULL", "0"):
+            return "&'static [u8]", "&[]"
+        return "&'static [u8]", "&[" + ", ".join(str(v) for v in lists[name]) + "]"
     if ctype == "DirType":
         return "Dir", f"Dir({evaluate(expr) & 0xFF})"
     if ctype == "MPHType":
@@ -350,10 +365,14 @@ def static_lists(src):
     for name, body in re.findall(r"static\s+short\s+const\s+(\w+)\s*\[\]\s*=\s*\{(.*?)\}\s*;", src, re.S):
         values = [evaluate(v) for v in split_args(body)]
         lists[name] = [v for v in values if v != 32767]
+    # Icon lists (`AltIcons`) end at -1.
+    for name, body in re.findall(r"static\s+char\s+const\s+(\w+)\s*\[\]\s*=\s*\{(.*?)\}\s*;", src, re.S):
+        values = [evaluate(v) for v in split_args(body)]
+        lists[name] = values[: values.index(-1)] if -1 in values else values
     return lists
 
 
-SKIP = {"name", "ininame", "do_table", "type", "airtype"}
+SKIP = {"name", "ininame", "do_table", "type", "airtype", "iconset", "fullname", "terrain"}
 DOCS = {"level": "Build level (tech level).", "pre": "Prerequisite buildings, as a bit mask of `BuildingType` ids.",
         "ownable": "Houses that may own it, as a bit mask of `House` ids.", "strength": "Full strength as written (buildings get double this; see `max_strength`).",
         "sightrange": "Sight range in cells.", "cost": "Cost to build, in credits.", "scenario": "First scenario it's available in.",
@@ -363,8 +382,13 @@ DOCS = {"level": "Build level (tech level).", "pre": "Prerequisite buildings, as
         "toffset": "Turret offset along the body centreline.", "exitpoint": "Exit point for produced units.",
         "power": "Power produced.", "is_unsellable": "Can't be sold.", "drain": "Power consumed.", "capacity": "Tiberium storage.", "size": "Footprint.",
         "exitlist": "Preferred exit cells, as offsets.", "sizelist": "Occupied cells, as offsets from the top-left.",
-        "overlap": "Overlapped (drawn over) cells, as offsets.", "toBuild": "What it produces.", "dir": "Starting idle facing.",
-        "arming": "Ticks before it can explode.", "range": "Range override.", "warhead": "Warhead.", "explosion": "Explosion on impact."}
+        "overlap": "Overlapped (drawn over) cells, as offsets.", "occupy": "Occupied cells, as offsets from its cell.",
+        "centerbase": "Offset of its base from its cell's corner, in leptons.", "toBuild": "What it produces.", "dir": "Starting idle facing.",
+        "arming": "Ticks before it can explode.", "theater": "Theaters it exists in, as a bit mask of `Theater` ids.",
+        "land": "The ground it makes.", "altland": "The ground its `alt_icons` make instead.",
+        "alticons": "Icons that make `alt_land` instead of `land`.", "width": "Width in cells.", "height": "Height in cells.",
+        "ground": "The ground it makes (anything but clear overrides the template).",
+        "damagelevels": "Damage stages, for walls.", "damagepoints": "Damage per stage, for walls.", "range": "Range override.", "warhead": "Warhead.", "explosion": "Explosion on impact."}
 
 
 def snake(n):
@@ -372,7 +396,10 @@ def snake(n):
     return {"type": "kind", "maxspeed": "max_speed", "sightrange": "sight_range", "toffset": "turret_offset",
             "deforder": "order", "exp": "explosion", "pre": "prerequisites", "ownable": "owners", "level": "tech_level",
             "sizelist": "occupy", "exitlist": "exits", "to_build": "builds", "firelaunch": "fire_launch",
-            "pronelaunch": "prone_launch", "tobuild": "builds", "speed": "locomotion", "max_speed": "max_speed", "sframe": "start_facing", "exitpoint": "exit_point", "canenter": "can_enter"}.get(s, s)
+            "pronelaunch": "prone_launch", "altland": "alt_land", "alticons": "alt_icons", "damagelevels": "damage_levels",
+            "damagepoints": "damage_points", "isradarvisible": "is_radar_visible", "iswooden": "is_wooden", "istarget": "is_target",
+            "iscrushable": "is_crushable", "istiberium": "is_tiberium", "walltype": "is_wall", "iscrate": "is_crate",
+            "high": "is_high", "theater": "theaters", "centerbase": "center_base", "tobuild": "builds", "speed": "locomotion", "max_speed": "max_speed", "sframe": "start_facing", "exitpoint": "exit_point", "canenter": "can_enter"}.get(s, s)
 
 
 objects_rs = [
@@ -385,9 +412,9 @@ objects_rs = [
     "",
     "use cnc_core::geometry::{Coord, Dir};",
     "",
-    "use super::enums::{Anim, Armor, Bullet, BuildingSize, Locomotion, Rtti, Voc, Warhead, Weapon};",
+    "use super::enums::{Anim, Armor, Bullet, BuildingSize, Land, Locomotion, Rtti, Voc, Warhead, Weapon};",
     "use crate::scenario::Mission;",
-    "use crate::{AircraftType, BuildingType, InfantryType, UnitType};",
+    "use crate::{AircraftType, BuildingType, InfantryType, OverlayType, TemplateType, TerrainType, UnitType};",
     "",
 ]
 
@@ -397,11 +424,21 @@ GROUPS = [
     ("BuildingData", "BDATA.CPP", "BuildingTypeClass", "BuildingType", "STRUCT_", "StructType", "BUILDINGS", "A building type's data."),
     ("AircraftData", "AADATA.CPP", "AircraftTypeClass", "AircraftType", "AIRCRAFT_", "AircraftType", "AIRCRAFT", "An aircraft type's data."),
     ("BulletData", "BBDATA.CPP", "BulletTypeClass", "Bullet", "BULLET_", "BulletType", "BULLETS", "A projectile type's data."),
+    ("TemplateData", "CDATA.CPP", "TemplateTypeClass", "TemplateType", "TEMPLATE_", "TemplateType", "TEMPLATES", "A terrain template's data."),
+    ("TerrainData", "TDATA.CPP", "TerrainTypeClass", "TerrainType", "TERRAIN_", "TerrainType", "TERRAINS", "A terrain object's (tree's, rock's) data."),
+    ("OverlayData", "ODATA.CPP", "OverlayTypeClass", "OverlayType", "OVERLAY_", "OverlayType", "OVERLAYS", "An overlay type's data."),
 ]
 
 counts = {}
 for struct, file, cls, rust_enum, prefix, cname, table, doc in GROUPS:
     src = preprocess(read(file), set(defined))
+    # Plain numeric #defines local to the file (e.g. TDATA.CPP's TREE_NORMAL).
+    for name, expr in re.findall(r"^\s*#\s*define\s+(\w+)\s+([^\n]+)$", src, re.M):
+        if name not in CONSTS:
+            try:
+                CONSTS[name] = evaluate(expr)
+            except (ValueError, SyntaxError, TypeError, NameError):
+                pass
     params = ctor_params(src, cls)
     lists = static_lists(src)
     by_var = {}
@@ -486,6 +523,25 @@ for (ident, _), row in zip(warhead_variants, warhead_rows):
     objects_rs += ["    WarheadData {", f"        kind: Warhead::{rust_ident(ident, 'WARHEAD_')},", f"        spread_factor: {evaluate(spread)},",
                    f"        wall_destroyer: {b(wall)},", f"        wood_destroyer: {b(wood)},", f"        tiberium_destroyer: {b(tib)},",
                    f"        modifier: [{', '.join(str(v) for v in m)}],", "    },"]
+objects_rs += ["];", ""]
+
+raw_const = strip_comments(read("CONST.CPP"))
+for name, value in re.findall(r"#define\s+(S\d)\s+(0x[0-9A-Fa-f]+)", raw_const):
+    CONSTS[name] = int(value, 16)
+ground = re.search(r"GroundType const Ground\[LAND_COUNT\]\s*=\s*\{(.*?)\n\};", const_src, re.S).group(1)
+ground_rows = re.findall(r"\{\s*[^{},]+,\s*\{([^{}]*)\}\s*,\s*(\w+)\s*\}", ground)
+land_variants = real_variants("LandType", "LAND_")
+if len(ground_rows) != len(land_variants):
+    sys.exit(f"{len(ground_rows)} ground rows for {len(land_variants)} land types")
+objects_rs += ["/// How a kind of ground affects movement and building (`GroundType`).", "#[derive(Debug, Clone, Copy, PartialEq, Eq)]",
+               "pub struct GroundData {", "    /// Which ground this is.", "    pub land: Land,",
+               "    /// Speed on it for each `Locomotion`, 0 (impassable) to 255 (full speed).", "    pub speed: [u8; 7],",
+               "    /// Whether buildings can be placed on it.", "    pub buildable: bool,", "}", "",
+               "/// Every kind of ground, in `Land` id order (`Ground[]`).", f"pub static GROUND: [GroundData; {len(ground_rows)}] = ["]
+for (ident, _), (costs, build) in zip(land_variants, ground_rows):
+    c = [evaluate(v) for v in split_args(costs)]
+    objects_rs += ["    GroundData {", f"        land: Land::{rust_ident(ident, 'LAND_')},", f"        speed: [{', '.join(str(v) for v in c)}],",
+                   f"        buildable: {'true' if evaluate(build) else 'false'},", "    },"]
 objects_rs += ["];", ""]
 
 OUT.mkdir(parents=True, exist_ok=True)

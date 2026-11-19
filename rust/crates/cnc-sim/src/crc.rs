@@ -19,7 +19,7 @@ const fn heap_rank(kind: Kind) -> Option<u8> {
         Kind::Infantry => Some(0),
         Kind::Unit => Some(1),
         Kind::Building => Some(2),
-        Kind::Aircraft | Kind::Vessel => None,
+        Kind::Aircraft | Kind::Vessel | Kind::Terrain => None,
     }
 }
 

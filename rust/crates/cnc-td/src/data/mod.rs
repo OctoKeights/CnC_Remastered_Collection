@@ -11,13 +11,17 @@
 pub mod enums;
 pub mod objects;
 
-pub use enums::{Anim, Armor, BuildingSize, Bullet, Locomotion, Rtti, Voc, Warhead, Weapon};
+pub use enums::{Anim, Armor, BuildingSize, Bullet, Land, Locomotion, Rtti, Voc, Warhead, Weapon};
 pub use objects::{
-    AIRCRAFT, AircraftData, BUILDINGS, BULLETS, BuildingData, BulletData, INFANTRY, InfantryData,
+    AIRCRAFT, AircraftData, BUILDINGS, BULLETS, BuildingData, BulletData, GROUND, GroundData,
+    INFANTRY, InfantryData, OVERLAYS, OverlayData, TEMPLATES, TERRAINS, TemplateData, TerrainData,
     UNITS, UnitData, WARHEADS, WEAPONS, WarheadData, WeaponData,
 };
 
-use crate::{AircraftType, BuildingType, House, InfantryType, UnitType};
+use crate::{
+    AircraftType, BuildingType, House, InfantryType, OverlayType, TemplateType, TerrainType,
+    Theater, UnitType,
+};
 
 impl UnitType {
     /// This vehicle's built-in data.
@@ -81,6 +85,95 @@ impl Warhead {
     }
 }
 
+impl TemplateType {
+    /// This template's built-in data.
+    #[must_use]
+    pub fn data(self) -> &'static TemplateData {
+        &TEMPLATES[usize::from(self.id())]
+    }
+}
+
+impl TemplateData {
+    /// The ground under one of this template's icons.
+    #[must_use]
+    pub fn land_at(&self, icon: u8) -> Land {
+        if self.alt_icons.contains(&icon) {
+            self.alt_land
+        } else {
+            self.land
+        }
+    }
+
+    /// Whether the template exists in `theater`.
+    #[must_use]
+    pub fn in_theater(&self, theater: Theater) -> bool {
+        self.theaters & (1 << theater.id()) != 0
+    }
+}
+
+impl TerrainType {
+    /// This terrain object's built-in data.
+    #[must_use]
+    pub fn data(self) -> &'static TerrainData {
+        &TERRAINS[usize::from(self.id())]
+    }
+}
+
+impl TerrainData {
+    /// Whether the object exists in `theater` (placing it elsewhere fails).
+    #[must_use]
+    pub fn in_theater(&self, theater: Theater) -> bool {
+        self.theaters & (1 << theater.id()) != 0
+    }
+}
+
+impl OverlayType {
+    /// This overlay's built-in data.
+    #[must_use]
+    pub fn data(self) -> &'static OverlayData {
+        &OVERLAYS[usize::from(self.id())]
+    }
+}
+
+impl Land {
+    /// How this ground affects movement and building.
+    #[must_use]
+    pub fn ground(self) -> &'static GroundData {
+        &GROUND[usize::from(self.id())]
+    }
+
+    /// Speed over this ground for `locomotion`, 0 (impassable) to 255 (full speed).
+    #[must_use]
+    pub fn speed(self, locomotion: Locomotion) -> u8 {
+        self.ground().speed[usize::from(locomotion.id())]
+    }
+
+    /// Whether `locomotion` can cross this ground at all.
+    #[must_use]
+    pub fn passable(self, locomotion: Locomotion) -> bool {
+        self.speed(locomotion) != 0
+    }
+}
+
+/// The ground of a cell from what's on it (`CellClass::Recalc_Attributes`).
+///
+/// An overlay decides it unless it leaves the ground clear (walls and Tiberium do; crates
+/// and the like don't); then the template icon, which may be one of the template's
+/// alternate icons (a shoreline's beach edge, say); and an empty cell is clear.
+#[must_use]
+pub fn cell_land(template: Option<(TemplateType, u8)>, overlay: Option<OverlayType>) -> Land {
+    if let Some(overlay) = overlay {
+        let land = overlay.data().ground;
+        if land != Land::Clear {
+            return land;
+        }
+    }
+    match template {
+        Some((template, icon)) => template.data().land_at(icon),
+        None => TemplateType::Clear1.data().land,
+    }
+}
+
 impl BuildingData {
     /// Hit points: the constructor doubles buildings' written strength.
     #[must_use]
@@ -134,6 +227,18 @@ mod tests {
         for &warhead in Warhead::ALL {
             assert_eq!(warhead.data().kind, warhead);
         }
+        for &template in TemplateType::ALL {
+            assert_eq!(template.data().kind, template);
+            assert_eq!(template.data().ini_name, template.name());
+        }
+        for &terrain in TerrainType::ALL {
+            assert_eq!(terrain.data().kind, terrain);
+            assert_eq!(terrain.data().ini_name, terrain.name());
+        }
+        for &overlay in OverlayType::ALL {
+            assert_eq!(overlay.data().kind, overlay);
+            assert_eq!(overlay.data().ini_name, overlay.name());
+        }
     }
 
     #[test]
@@ -161,6 +266,37 @@ mod tests {
         assert!(weap.requires(BuildingType::Refinery));
         assert_eq!(weap.builds, Rtti::Unittype);
         assert_eq!(weap.max_strength(), u32::from(weap.strength) * 2);
+    }
+
+    #[test]
+    fn cell_ground() {
+        // Shore templates are water except the icons listed as beach.
+        let shore = TemplateType::Shore1;
+        assert_eq!(cell_land(Some((shore, 0)), None), Land::Beach);
+        assert_eq!(cell_land(Some((shore, 8)), None), Land::Water);
+        assert_eq!(cell_land(None, None), Land::Clear);
+        // Walls and Tiberium override the template; ground they leave clear doesn't.
+        let water = Some((TemplateType::Water, 0));
+        assert_eq!(cell_land(water, Some(OverlayType::SandbagWall)), Land::Wall);
+        assert_eq!(
+            cell_land(None, Some(OverlayType::Tiberium1)),
+            Land::Tiberium
+        );
+        assert_eq!(cell_land(water, Some(OverlayType::WoodCrate)), Land::Water);
+        assert!(TemplateType::Shore1.data().in_theater(Theater::Temperate));
+        assert!(!TemplateType::Shore1.data().in_theater(Theater::Desert));
+    }
+
+    #[test]
+    fn ground_speeds() {
+        assert!(Land::Road.speed(Locomotion::Wheel) > 0);
+        assert!(!Land::Water.passable(Locomotion::Track));
+        assert!(Land::Water.passable(Locomotion::Float));
+        assert!(!Land::Clear.passable(Locomotion::Float));
+        assert!(Land::Rock.passable(Locomotion::Winged));
+        // Foot soldiers are quicker on roads than on clear ground.
+        assert!(Land::Road.speed(Locomotion::Foot) > Land::Clear.speed(Locomotion::Foot));
+        assert!(Land::Clear.ground().buildable && !Land::Tiberium.ground().buildable);
     }
 
     #[test]

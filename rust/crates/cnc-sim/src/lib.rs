@@ -37,7 +37,9 @@
 pub mod components;
 pub mod crc;
 mod digest;
+pub mod map;
 pub mod resources;
+pub mod scenario;
 mod simulation;
 
 pub use bevy_ecs;
@@ -46,5 +48,7 @@ pub use cnc_core::sync::{StateDigest, SyncCheck, SyncHistory};
 pub use components::{
     HeapIndex, HouseId, Kind, Position, PrimaryFacing, SecondaryFacing, Strength,
 };
+pub use map::Map;
 pub use resources::{CrtRng, Frame, GameCrc, SimRng};
+pub use scenario::{MapLoadReport, TerrainObject, icon_check_from_art, load_td_map};
 pub use simulation::{DEFAULT_SYNC_HISTORY, ObjectSpawn, Phase, Simulation, Threading, Tick};

@@ -21,6 +21,8 @@ pub enum Kind {
     Vessel,
     /// `BuildingClass`.
     Building,
+    /// `TerrainClass`: trees, rocks and other scenery objects.
+    Terrain,
 }
 
 /// Creation order, standing in for an object's position in its class's heap.

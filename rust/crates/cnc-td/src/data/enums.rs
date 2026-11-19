@@ -1429,3 +1429,58 @@ impl BuildingSize {
         self as u8
     }
 }
+
+/// A kind of ground (`LandType`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(u8)]
+pub enum Land {
+    /// `LAND_CLEAR`.
+    Clear = 0,
+    /// `LAND_ROAD`.
+    Road = 1,
+    /// `LAND_WATER`.
+    Water = 2,
+    /// `LAND_ROCK`.
+    Rock = 3,
+    /// `LAND_WALL`.
+    Wall = 4,
+    /// `LAND_TIBERIUM`.
+    Tiberium = 5,
+    /// `LAND_BEACH`.
+    Beach = 6,
+}
+
+impl Land {
+    /// Every variant, in id order.
+    pub const ALL: &'static [Self] = &[
+        Self::Clear,
+        Self::Road,
+        Self::Water,
+        Self::Rock,
+        Self::Wall,
+        Self::Tiberium,
+        Self::Beach,
+    ];
+
+    /// Looks up a variant by its original numeric value.
+    #[must_use]
+    #[allow(clippy::too_many_lines)]
+    pub const fn from_id(id: u8) -> Option<Self> {
+        match id {
+            0 => Some(Self::Clear),
+            1 => Some(Self::Road),
+            2 => Some(Self::Water),
+            3 => Some(Self::Rock),
+            4 => Some(Self::Wall),
+            5 => Some(Self::Tiberium),
+            6 => Some(Self::Beach),
+            _ => None,
+        }
+    }
+
+    /// The original numeric value.
+    #[must_use]
+    pub const fn id(self) -> u8 {
+        self as u8
+    }
+}

@@ -18,7 +18,9 @@ use cnc_core::state_hash::{StateHash, StateHasher};
 use crate::components::{
     HeapIndex, HouseId, Kind, Position, PrimaryFacing, SecondaryFacing, Strength,
 };
+use crate::map::Map;
 use crate::resources::{CrtRng, Frame, SimRng};
+use crate::scenario::TerrainObject;
 
 /// Writes one section of the digest.
 pub(crate) type SectionFn = fn(&mut World, &mut StateHasher);
@@ -49,6 +51,12 @@ newtypes!(
     SimRng,
     CrtRng
 );
+
+impl StateHash for TerrainObject {
+    fn state_hash(&self, hasher: &mut StateHasher) {
+        self.0.id().state_hash(hasher);
+    }
+}
 
 /// Hashes which objects exist: every `(Kind, HeapIndex)` in heap order.
 pub(crate) fn hash_objects(world: &mut World, hasher: &mut StateHasher) {
@@ -86,11 +94,13 @@ pub(crate) fn core_sections() -> Vec<(&'static str, SectionFn)> {
         ("frame", hash_resource::<Frame>),
         ("sim_rng", hash_resource::<SimRng>),
         ("crt_rng", hash_resource::<CrtRng>),
+        ("map", hash_resource::<Map>),
         ("objects", hash_objects),
         ("house", hash_component::<HouseId>),
         ("position", hash_component::<Position>),
         ("primary_facing", hash_component::<PrimaryFacing>),
         ("secondary_facing", hash_component::<SecondaryFacing>),
         ("strength", hash_component::<Strength>),
+        ("terrain_object", hash_component::<TerrainObject>),
     ]
 }

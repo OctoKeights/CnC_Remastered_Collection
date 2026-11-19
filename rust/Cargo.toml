@@ -12,6 +12,7 @@ repository = "https://github.com/OctoKeights/CnC_Remastered_Collection"
 [workspace.dependencies]
 cnc-core = { path = "crates/cnc-core" }
 cnc-td = { path = "crates/cnc-td" }
+cnc-assets = { path = "crates/cnc-assets" }
 cnc-ra = { path = "crates/cnc-ra" }
 cnc-sim = { path = "crates/cnc-sim" }
 bevy_ecs = { version = "0.20", default-features = false, features = ["std", "multi_threaded"] }
