@@ -48,9 +48,9 @@ pub fn compute_game_crc(
         .filter_map(|(&kind, &index, position, primary, secondary)| {
             let rank = heap_rank(kind)?;
             let mut value = position.0.raw();
-            value = value.wrapping_add(u32::from(primary.map_or(0, |f| f.0.0)));
+            value = value.wrapping_add(u32::from(primary.map_or(0, |f| f.0.current().0)));
             if kind == Kind::Unit {
-                value = value.wrapping_add(u32::from(secondary.map_or(0, |f| f.0.0)));
+                value = value.wrapping_add(u32::from(secondary.map_or(0, |f| f.0.current().0)));
             }
             Some((rank, index, value))
         })

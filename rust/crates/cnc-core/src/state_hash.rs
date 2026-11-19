@@ -184,6 +184,13 @@ impl StateHash for Coord {
     }
 }
 
+impl StateHash for crate::geometry::Turning {
+    fn state_hash(&self, hasher: &mut StateHasher) {
+        self.current().state_hash(hasher);
+        self.desired().state_hash(hasher);
+    }
+}
+
 impl StateHash for Dir {
     fn state_hash(&self, hasher: &mut StateHasher) {
         self.0.state_hash(hasher);

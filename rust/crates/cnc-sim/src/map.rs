@@ -14,6 +14,8 @@ use cnc_core::state_hash::{StateHash, StateHasher};
 use cnc_td::data::{Land, Locomotion, cell_land};
 use cnc_td::{Cell, MAP_CELLS, OverlayType, TemplateType, Theater};
 
+use crate::components::Kind;
+
 /// Credits per step of Tiberium density (`UnitTypeClass::TIBERIUM_STEP`).
 pub const TIBERIUM_STEP: i32 = 25;
 
@@ -34,6 +36,10 @@ pub struct CellState {
     pub overlay_data: u8,
     land: Land,
     land_override: Option<Land>,
+    /// Occupation flags (`Flag.Composite`): infantry spots, vehicle reservation, ...
+    flags: u8,
+    /// The house whose infantry hold spots in the cell (`InfType`).
+    pub infantry_house: Option<cnc_td::House>,
     /// Objects occupying the cell, most recently placed first (`OccupierPtr` and the
     /// objects' `Next` links).
     occupiers: Vec<Entity>,
@@ -47,6 +53,8 @@ impl Default for CellState {
             overlay_data: 0,
             land: cell_land(None, None),
             land_override: None,
+            flags: 0,
+            infantry_house: None,
             occupiers: Vec::new(),
         }
     }
@@ -58,6 +66,26 @@ impl CellState {
     pub fn land(&self) -> Land {
         self.land_override.unwrap_or(self.land)
     }
+
+    /// The occupation flags (`Flag.Composite`): bits 0-4 are the infantry spots, then
+    /// [`CellState::VEHICLE`], monolith and building.
+    #[must_use]
+    pub fn flags(&self) -> u8 {
+        self.flags
+    }
+
+    /// Whether a vehicle has reserved the cell (`Flag.Occupy.Vehicle`).
+    #[must_use]
+    pub fn vehicle_reserved(&self) -> bool {
+        self.flags & Self::VEHICLE != 0
+    }
+
+    /// The vehicle bit of [`CellState::flags`]: a vehicle is in the cell or driving into it.
+    pub const VEHICLE: u8 = 0x20;
+    /// The monolith bit: something immovable (a tree, a rock) is in the cell.
+    pub const MONOLITH: u8 = 0x40;
+    /// The building bit.
+    pub const BUILDING: u8 = 0x80;
 
     /// Objects occupying the cell, most recently placed first.
     #[must_use]
@@ -87,9 +115,21 @@ impl StateHash for CellState {
         hasher.add(&self.overlay_data);
         hasher.add(&self.land.id());
         hasher.add(&self.land_override.map(Land::id));
+        hasher.add(&self.flags);
+        hasher.add(&self.infantry_house.map(cnc_td::House::id));
         // Occupants are hashed through their own components; here only how many there
         // are, since entity ids are an ECS detail.
         hasher.add(&u32::try_from(self.occupiers.len()).unwrap_or(u32::MAX));
+    }
+}
+
+/// The occupation flag an object of `kind` sets in its cell (`Occupy_Down`).
+const fn occupy_flag(kind: Kind) -> u8 {
+    match kind {
+        Kind::Unit | Kind::Aircraft => CellState::VEHICLE,
+        Kind::Terrain => CellState::MONOLITH,
+        Kind::Building => CellState::BUILDING,
+        Kind::Infantry | Kind::Vessel => 0,
     }
 }
 
@@ -194,20 +234,43 @@ impl Map {
         }
     }
 
-    /// Records `entity` as occupying `cell`, in front of earlier occupants
-    /// (`Occupy_Down`). Adding an entity already there does nothing.
-    pub fn occupy(&mut self, cell: Cell, entity: Entity) {
+    /// Records `entity` (an object of `kind`) as occupying `cell`, in front of earlier
+    /// occupants, and sets the cell's flag for its kind: vehicle for units and aircraft,
+    /// monolith for terrain, building for buildings (`Occupy_Down`). Adding an entity
+    /// already there does nothing at all.
+    pub fn occupy(&mut self, cell: Cell, entity: Entity, kind: Kind) {
         if let Some(c) = self.cell_mut(cell)
             && !c.occupiers.contains(&entity)
         {
             c.occupiers.insert(0, entity);
+            c.flags |= occupy_flag(kind);
         }
     }
 
-    /// Removes `entity` from `cell`'s occupants (`Occupy_Up`).
-    pub fn vacate(&mut self, cell: Cell, entity: Entity) {
+    /// Sets or clears a cell's vehicle reservation (`Flag.Occupy.Vehicle`).
+    pub fn set_vehicle_reserved(&mut self, cell: Cell, reserved: bool) {
+        if let Some(c) = self.cell_mut(cell) {
+            if reserved {
+                c.flags |= CellState::VEHICLE;
+            } else {
+                c.flags &= !CellState::VEHICLE;
+            }
+        }
+    }
+
+    /// Whether `cell` is inside the playable area (`In_Radar`), rejecting indexes past the
+    /// map as the original's `cell & 0xF000` test does.
+    #[must_use]
+    pub fn in_radar(&self, cell: Cell) -> bool {
+        cell.index() & 0xF000 == 0 && self.in_bounds(cell)
+    }
+
+    /// Removes `entity` from `cell`'s occupants and clears its kind's flag, whether or not
+    /// it was there (`Occupy_Up`).
+    pub fn vacate(&mut self, cell: Cell, entity: Entity, kind: Kind) {
         if let Some(c) = self.cell_mut(cell) {
             c.occupiers.retain(|&e| e != entity);
+            c.flags &= !occupy_flag(kind);
         }
     }
 
@@ -482,11 +545,13 @@ mod tests {
         let c = Cell::new(3, 3);
         let mut world = bevy_ecs::world::World::new();
         let (a, b) = (world.spawn_empty().id(), world.spawn_empty().id());
-        m.occupy(c, a);
-        m.occupy(c, b);
-        m.occupy(c, a);
+        m.occupy(c, a, Kind::Terrain);
+        m.occupy(c, b, Kind::Unit);
+        m.occupy(c, a, Kind::Terrain);
         assert_eq!(m.cell(c).occupiers(), [b, a]);
-        m.vacate(c, b);
+        assert_eq!(m.cell(c).flags(), CellState::VEHICLE | CellState::MONOLITH);
+        m.vacate(c, b, Kind::Unit);
         assert_eq!(m.cell(c).occupiers(), [a]);
+        assert_eq!(m.cell(c).flags(), CellState::MONOLITH);
     }
 }

@@ -18,6 +18,8 @@ use cnc_core::state_hash::{StateHash, StateHasher};
 use crate::components::{
     HeapIndex, HouseId, Kind, Position, PrimaryFacing, SecondaryFacing, Strength,
 };
+use crate::drive::{Drive, Foot, MissionState, Placement, UnitKind};
+use crate::houses::Houses;
 use crate::map::Map;
 use crate::resources::{CrtRng, Frame, SimRng};
 use crate::scenario::TerrainObject;
@@ -95,6 +97,7 @@ pub(crate) fn core_sections() -> Vec<(&'static str, SectionFn)> {
         ("sim_rng", hash_resource::<SimRng>),
         ("crt_rng", hash_resource::<CrtRng>),
         ("map", hash_resource::<Map>),
+        ("houses", hash_resource::<Houses>),
         ("objects", hash_objects),
         ("house", hash_component::<HouseId>),
         ("position", hash_component::<Position>),
@@ -102,5 +105,10 @@ pub(crate) fn core_sections() -> Vec<(&'static str, SectionFn)> {
         ("secondary_facing", hash_component::<SecondaryFacing>),
         ("strength", hash_component::<Strength>),
         ("terrain_object", hash_component::<TerrainObject>),
+        ("unit_kind", hash_component::<UnitKind>),
+        ("mission", hash_component::<MissionState>),
+        ("foot", hash_component::<Foot>),
+        ("drive", hash_component::<Drive>),
+        ("placement", hash_component::<Placement>),
     ]
 }

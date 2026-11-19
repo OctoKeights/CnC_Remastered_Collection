@@ -5,7 +5,7 @@
 //! class's fields would have held.
 
 use bevy_ecs::component::Component;
-use cnc_core::geometry::{Coord, Dir};
+use cnc_core::geometry::{Coord, Turning};
 
 /// Which of the original's object heaps an entity belongs to (`RTTIType`, reduced to the
 /// classes the simulation keeps in heaps).
@@ -38,13 +38,14 @@ pub struct HeapIndex(pub u32);
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Position(pub Coord);
 
-/// The body's current facing (`FootClass::PrimaryFacing`; buildings have one too).
+/// The body's facing and the facing it's turning to (`TechnoClass::PrimaryFacing`;
+/// buildings have one too).
 #[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub struct PrimaryFacing(pub Dir);
+pub struct PrimaryFacing(pub Turning);
 
-/// A turret's current facing (`UnitClass::SecondaryFacing`).
+/// A turret's facing (`TurretClass::SecondaryFacing`).
 #[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub struct SecondaryFacing(pub Dir);
+pub struct SecondaryFacing(pub Turning);
 
 /// Hit points left (`ObjectClass::Strength`).
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Hash)]

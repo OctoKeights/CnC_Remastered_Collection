@@ -12,7 +12,7 @@ use bevy_ecs::schedule::{
 use bevy_ecs::system::{ResMut, ScheduleSystem};
 use bevy_ecs::world::World;
 use bevy_tasks::{ComputeTaskPool, TaskPool};
-use cnc_core::geometry::{Coord, Dir};
+use cnc_core::geometry::{Coord, Dir, Turning};
 use cnc_core::state_hash::StateHash;
 use cnc_core::sync::{StateDigest, SyncCheck, SyncHistory};
 
@@ -21,6 +21,8 @@ use crate::components::{
 };
 use crate::crc::compute_game_crc;
 use crate::digest::{SectionFn, core_sections, hash_component, hash_resource};
+use crate::drive::{DriveOptions, drive_units};
+use crate::houses::Houses;
 use crate::resources::{CrtRng, Frame, GameCrc, NextHeapIndex, SimRng};
 
 /// The schedule run once per game frame.
@@ -32,7 +34,10 @@ pub struct Tick;
 pub enum Phase {
     /// Apply the player and network commands scheduled for this frame (`EVENT.CPP`).
     Events,
-    /// Object and house AI (`LogicClass::AI`): movement, combat, production.
+    /// Every object's own AI, one object at a time in logic order (`LogicClass::AI`'s
+    /// object loop): movement so far.
+    Objects,
+    /// Other per-tick game logic, after the objects have run.
     Logic,
     /// End of frame: the sync CRC, then the frame counter.
     Sync,
@@ -99,6 +104,8 @@ impl Simulation {
         world.init_resource::<CrtRng>();
         world.init_resource::<GameCrc>();
         world.init_resource::<NextHeapIndex>();
+        world.init_resource::<Houses>();
+        world.init_resource::<DriveOptions>();
 
         let mut tick = Schedule::new(Tick);
         tick.set_build_settings(ScheduleBuildSettings {
@@ -109,7 +116,8 @@ impl Simulation {
             Threading::Single => tick.set_executor(SingleThreadedExecutor::new()),
             Threading::Multi => tick.set_executor(MultiThreadedExecutor::new()),
         };
-        tick.configure_sets((Phase::Events, Phase::Logic, Phase::Sync).chain());
+        tick.configure_sets((Phase::Events, Phase::Objects, Phase::Logic, Phase::Sync).chain());
+        tick.add_systems(drive_units.in_set(Phase::Objects));
         tick.add_systems(
             (compute_game_crc, advance_frame)
                 .chain()
@@ -149,11 +157,11 @@ impl Simulation {
             index,
             object.house,
             Position(object.position),
-            PrimaryFacing(object.facing),
+            PrimaryFacing(Turning::new(object.facing)),
             Strength(object.strength),
         ));
         if object.kind == Kind::Unit {
-            entity.insert(SecondaryFacing(object.facing));
+            entity.insert(SecondaryFacing(Turning::new(object.facing)));
         }
         entity.id()
     }

@@ -13,7 +13,7 @@ use cnc_core::ini::Ini;
 use cnc_core::mix::MixArchive;
 use cnc_core::scenario::atoi;
 use cnc_sim::scenario::IconCheck;
-use cnc_sim::{Map, Simulation, Threading, icon_check_from_art, load_td_map};
+use cnc_sim::{Map, Simulation, Threading, icon_check_from_art, load_td_scenario};
 use cnc_td::data::Land;
 use cnc_td::{Cell, OverlayType, TemplateType, Theater};
 
@@ -49,7 +49,7 @@ fn theater_art(dir: &std::path::Path) -> HashMap<(Theater, TemplateType), Vec<Op
 
 fn load(name: &str, ini: &Ini, bin: &[u8], check: Option<IconCheck<'_>>) -> Simulation {
     let mut sim = Simulation::new(Threading::Single);
-    load_td_map(&mut sim, name, ini, bin, check);
+    load_td_scenario(&mut sim, name, ini, bin, check);
     sim
 }
 
@@ -62,7 +62,7 @@ fn campaign_maps_load() {
     };
     let art = theater_art(&dir);
     let mut general = mix(&dir, "GENERAL.MIX");
-    let (mut maps, mut cleared, mut refused) = (0, 0, 0);
+    let (mut maps, mut cleared, mut refused, mut units) = (0, 0, 0, 0);
     let mut land_totals: HashMap<Land, u32> = HashMap::new();
     for side in ["G", "B"] {
         for n in 1..=15 {
@@ -79,14 +79,46 @@ fn campaign_maps_load() {
                 let check = icon_check_from_art(|t| art.get(&(theater, t)).cloned());
 
                 let mut sim = Simulation::new(Threading::Single);
-                let report = load_td_map(&mut sim, &stem, &ini, &bin, Some(&check));
+                let report = load_td_scenario(&mut sim, &stem, &ini, &bin, Some(&check));
                 maps += 1;
                 cleared += report.icons_cleared;
                 refused += report.overlays_refused;
+                units += report.units;
+                let listed_units = ini.section("UNITS").map_or(0, |s| s.iter().count());
+                assert_eq!(
+                    report.units + report.units_skipped,
+                    u32::try_from(listed_units).expect("small"),
+                    "{stem}"
+                );
 
-                // Loading is deterministic.
+                // Loading, and running with every vehicle parked, are deterministic.
                 let mut again = load(&stem, &ini, &bin, Some(&check));
                 assert_eq!(sim.digest(), again.digest(), "{stem}");
+                for _ in 0..30 {
+                    assert_eq!(
+                        sim.step().expect("schedule"),
+                        again.step().expect("schedule")
+                    );
+                }
+                assert_eq!(sim.digest(), again.digest(), "{stem}");
+
+                // Each vehicle sits at its cell's centre, in that cell's occupant list.
+                let world = sim.world_mut();
+                let placed: Vec<_> = world
+                    .query::<(
+                        cnc_sim::bevy_ecs::entity::Entity,
+                        &cnc_sim::drive::UnitKind,
+                        &cnc_sim::Position,
+                    )>()
+                    .iter(world)
+                    .map(|(e, _, p)| (e, p.0))
+                    .collect();
+                let map = world.resource::<Map>();
+                for (entity, coord) in placed {
+                    let cell = Cell::containing(coord);
+                    assert_eq!(coord, cell.center(), "{stem}");
+                    assert!(map.cell(cell).occupiers().contains(&entity), "{stem}");
+                }
 
                 let map = sim.world().resource::<Map>();
                 // Every overlay the file asks for is either on the map or was refused.
@@ -138,7 +170,7 @@ fn campaign_maps_load() {
         }
     }
     println!(
-        "{maps} maps; {cleared} template cells cleared for missing icons; \
+        "{maps} maps; {units} vehicles; {cleared} template cells cleared for missing icons; \
          {refused} overlays refused; land totals {land_totals:?}"
     );
     assert_eq!(maps, 47);

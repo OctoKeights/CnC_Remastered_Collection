@@ -85,14 +85,15 @@ fn wander(
     sorted.sort_unstable_by_key(|(index, _)| **index);
     for (_, mut facing) in sorted {
         let turn = rng.0.range(-8, 8) as i8;
-        facing.0 = Dir(facing.0.0.wrapping_add_signed(turn));
+        let current = facing.0.current();
+        facing.0.set(Dir(current.0.wrapping_add_signed(turn)));
     }
 }
 
 /// Moves each object one step along its facing. Order-independent.
 fn drive(mut objects: Query<'_, '_, (&PrimaryFacing, &mut Position)>) {
     for (facing, mut position) in &mut objects {
-        position.0 = position.0.adjacent(facing.0.facing());
+        position.0 = position.0.adjacent(facing.0.current().facing());
     }
 }
 

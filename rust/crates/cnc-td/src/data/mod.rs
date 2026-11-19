@@ -10,6 +10,7 @@
 
 pub mod enums;
 pub mod objects;
+pub mod tracks;
 
 pub use enums::{Anim, Armor, BuildingSize, Bullet, Land, Locomotion, Rtti, Voc, Warhead, Weapon};
 pub use objects::{

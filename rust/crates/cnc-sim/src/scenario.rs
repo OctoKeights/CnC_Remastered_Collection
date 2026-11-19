@@ -1,23 +1,30 @@
-//! Loading a Tiberian Dawn scenario's map into a [`Simulation`] (the map parts of
-//! `Read_Scenario_Ini` in `INI.CPP`).
+//! Loading a Tiberian Dawn scenario into a [`Simulation`] (`Read_Scenario_Ini` in
+//! `INI.CPP`).
 //!
-//! Steps run in the original's order, which matters: terrain objects go down before
-//! overlays (Tiberium won't grow under a tree), overlays go down in the order the file
-//! lists them, and the final [`Map::overpass`] draws random numbers.
+//! Steps run in the original's order, which matters: houses first, terrain objects before
+//! vehicles and overlays (Tiberium won't grow under a tree), overlays in the order the
+//! file lists them, and the final [`Map::overpass`] draws random numbers.
 //!
-//! Not loaded yet: units, infantry, aircraft, buildings, smudges, triggers and the
-//! briefing. The C runtime `rand()` state ([`CrtRng`]) is used as it stands; the caller
+//! Not loaded yet: infantry, aircraft, buildings, smudges, triggers, teams and the
+//! briefing; vehicles keep their scenario mission but missions don't run yet. The C runtime `rand()` state ([`CrtRng`]) is used as it stands; the caller
 //! seeds it as the game would (`srand(Seed)` at start-up).
 
 use bevy_ecs::component::Component;
+use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
-use cnc_core::geometry::Coord;
+use cnc_core::geometry::{Coord, Dir, Turning};
 use cnc_core::ini::{Ini, Section};
+use cnc_core::random::fixed_to_cardinal;
 use cnc_core::scenario::{atoi, tokens};
 use cnc_td::data::Land;
-use cnc_td::{Cell, MAP_CELLS, MAP_WIDTH, OverlayType, TemplateType, TerrainType};
+use cnc_td::scenario::Mission;
+use cnc_td::{Cell, House, MAP_CELLS, MAP_WIDTH, OverlayType, TemplateType, TerrainType, UnitType};
 
-use crate::components::{HeapIndex, Kind, Position, Strength};
+use crate::components::{
+    HeapIndex, HouseId, Kind, Position, PrimaryFacing, SecondaryFacing, Strength,
+};
+use crate::drive::{Drive, Foot, MissionState, Placement, UnitKind};
+use crate::houses::Houses;
 use crate::map::Map;
 use crate::resources::{CrtRng, NextHeapIndex};
 use crate::simulation::Simulation;
@@ -58,6 +65,10 @@ pub struct MapLoadReport {
     pub terrain: u32,
     /// Terrain objects skipped (wrong theater, off the map, unknown type).
     pub terrain_skipped: u32,
+    /// Vehicles placed.
+    pub units: u32,
+    /// Vehicle lines skipped (unknown house or type, off the map).
+    pub units_skipped: u32,
     /// Overlays placed.
     pub overlays: u32,
     /// Overlays the placement rules refused (blocked cell, unbuildable ground, ...).
@@ -70,10 +81,10 @@ pub struct MapLoadReport {
 /// Nod missions (`Read_Scenario_Ini`).
 const LAND_FIXES: [(&str, u16); 2] = [("scb07ea", 2795), ("scb10eb", 2015)];
 
-/// Loads `ini` and its `.BIN` terrain into `sim`'s [`Map`] and spawns its terrain
-/// objects. `name` is the scenario's file stem (e.g. `SCB07EA`), which selects the
-/// Remastered Collection's per-mission fixes.
-pub fn load_td_map(
+/// Loads scenario `ini` and its `.BIN` terrain into `sim`: houses, the [`Map`], terrain
+/// objects, vehicles and overlays. `name` is the scenario's file stem (e.g. `SCB07EA`),
+/// which selects the Remastered Collection's per-mission fixes.
+pub fn load_td_scenario(
     sim: &mut Simulation,
     name: &str,
     ini: &Ini,
@@ -84,10 +95,12 @@ pub fn load_td_map(
     let info = cnc_td::map::read_map_info(ini);
     let mut map = Map::new(info.theater, info.bounds);
     let world = sim.world_mut();
+    world.insert_resource(Houses::read_scenario(ini));
 
     read_bin(&mut map, bin, icon_exists, &mut report);
     place_terrain(world, &mut map, ini, &mut report);
-    place_overlays(&mut map, ini, &mut report);
+    place_units(world, &mut map, ini, &mut report);
+    place_overlays(world, &mut map, ini, &mut report);
 
     // The final smoothing pass, then the Remastered fixes.
     let mut rng = world.resource::<CrtRng>().0;
@@ -163,16 +176,104 @@ fn place_terrain(world: &mut World, map: &mut Map, ini: &Ini, report: &mut MapLo
             if let Ok(target) = u16::try_from(target)
                 && usize::from(target) < MAP_CELLS
             {
-                map.occupy(Cell::from_index(target), entity);
+                map.occupy(Cell::from_index(target), entity, Kind::Terrain);
             }
         }
         report.terrain += 1;
     }
 }
 
-/// Overlays (`OverlayClass::Read_INI`), in file order. Only terrain occupies cells at
-/// this point, so any occupant means a terrain object.
-fn place_overlays(map: &mut Map, ini: &Ini, report: &mut MapLoadReport) {
+/// Vehicles (`UnitClass::Read_INI`), in file order. Each line is
+/// `house,type,strength,cell,facing,mission[,trigger]`.
+fn place_units(world: &mut World, map: &mut Map, ini: &Ini, report: &mut MapLoadReport) {
+    for (_, value) in ini.section("UNITS").into_iter().flat_map(Section::iter) {
+        let mut fields = tokens(value);
+        let house = fields.next().and_then(|n| n.parse::<House>().ok());
+        let kind = fields.next().and_then(|n| n.parse::<UnitType>().ok());
+        let (Some(house), Some(kind)) = (house, kind) else {
+            report.units_skipped += 1;
+            continue;
+        };
+        let strength = fields.next().map_or(0, atoi);
+        let cell = fields.next().map_or(0, atoi);
+        // `(DirType)atoi(...)`: only the low byte survives.
+        let facing = Dir(fields.next().map_or(0, atoi).to_le_bytes()[0]);
+        let mission = fields.next().and_then(|n| n.parse::<Mission>().ok());
+        // `(CELL)atoi(...)`; a cell past the map would index out of bounds in the original.
+        let Some(cell) = u16::try_from(cell)
+            .ok()
+            .filter(|&c| usize::from(c) < MAP_CELLS)
+            .map(Cell::from_index)
+        else {
+            report.units_skipped += 1;
+            continue;
+        };
+        spawn_td_unit(world, map, house, kind, cell, facing, strength, mission);
+        report.units += 1;
+    }
+}
+
+/// Creates a vehicle as a scenario line would (`new UnitClass` then `Unlimbo`): facing
+/// snapped to a compass direction, `strength` as a fraction of full (0..=256), placed in
+/// `cell`'s occupant list, and locked onto the map if it starts inside it.
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_td_unit(
+    world: &mut World,
+    map: &mut Map,
+    house: House,
+    kind: UnitType,
+    cell: Cell,
+    facing: Dir,
+    strength: i32,
+    mission: Option<Mission>,
+) -> Entity {
+    let data = kind.data();
+    let mut dir = facing.facing().dir();
+    let mut mission = mission.unwrap_or(Mission::Guard);
+    let mut foot = Foot::default();
+    if kind == UnitType::Gunboat {
+        // The gunboat drives off the map's western edge (`UnitClass::Read_INI`).
+        dir = Dir::W;
+        mission = Mission::Hunt;
+        let bounds = map.bounds();
+        foot.nav_com = Some(Cell::new(bounds.x.wrapping_sub(1), cell.y()));
+    }
+    let max = u32::from(data.strength);
+    let strength = u32::try_from(strength).map_or(0, |s| fixed_to_cardinal(max, s));
+    let mut next = world.resource_mut::<NextHeapIndex>();
+    let heap = HeapIndex(next.0);
+    next.0 += 1;
+    let entity = world
+        .spawn((
+            (
+                Kind::Unit,
+                heap,
+                HouseId(house.id()),
+                Position(cell.center()),
+            ),
+            (
+                PrimaryFacing(Turning::new(dir)),
+                SecondaryFacing(Turning::new(dir)),
+                Strength(u16::try_from(strength).unwrap_or(u16::MAX)),
+            ),
+            (
+                UnitKind(kind),
+                MissionState(mission),
+                foot,
+                Drive::default(),
+            ),
+            Placement {
+                is_down: true,
+                is_locked: map.in_radar(cell),
+            },
+        ))
+        .id();
+    map.occupy(cell, entity, Kind::Unit);
+    entity
+}
+
+/// Overlays (`OverlayClass::Read_INI`), in file order.
+fn place_overlays(world: &World, map: &mut Map, ini: &Ini, report: &mut MapLoadReport) {
     let last = MAP_CELLS as i32 - i32::from(MAP_WIDTH);
     for (key, value) in ini.section("OVERLAY").into_iter().flat_map(Section::iter) {
         let Some(overlay) = tokens(value)
@@ -192,7 +293,11 @@ fn place_overlays(map: &mut Map, ini: &Ini, report: &mut MapLoadReport) {
                 continue;
             }
         };
-        let has_terrain = !map.cell(cell).occupiers().is_empty();
+        let has_terrain = map
+            .cell(cell)
+            .occupiers()
+            .iter()
+            .any(|&e| world.get::<TerrainObject>(e).is_some());
         if map.place_overlay(cell, overlay, has_terrain, true) {
             report.overlays += 1;
         } else {

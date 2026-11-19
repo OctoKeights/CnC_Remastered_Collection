@@ -528,3 +528,126 @@ mod tests {
         assert_eq!(Facing::NW.rotate(2), Facing::NE);
     }
 }
+
+/// A facing that turns towards a desired direction over time (`FacingClass` in
+/// `FACING.CPP`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct Turning {
+    current: Dir,
+    desired: Dir,
+}
+
+impl Turning {
+    /// Facing `dir`, not turning.
+    #[must_use]
+    pub const fn new(dir: Dir) -> Self {
+        Self {
+            current: dir,
+            desired: dir,
+        }
+    }
+
+    /// The current facing.
+    #[must_use]
+    pub const fn current(self) -> Dir {
+        self.current
+    }
+
+    /// The facing it's turning towards.
+    #[must_use]
+    pub const fn desired(self) -> Dir {
+        self.desired
+    }
+
+    /// Faces `dir` immediately (`Set`).
+    pub fn set(&mut self, dir: Dir) {
+        self.current = dir;
+        self.desired = dir;
+    }
+
+    /// Changes the current facing only (`Set_Current`); returns whether it changed.
+    pub fn set_current(&mut self, dir: Dir) -> bool {
+        let changed = self.current != dir;
+        self.current = dir;
+        changed
+    }
+
+    /// Starts turning towards `dir` (`Set_Desired`); returns whether it changed.
+    pub fn set_desired(&mut self, dir: Dir) -> bool {
+        let changed = self.desired != dir;
+        self.desired = dir;
+        changed
+    }
+
+    /// Whether it hasn't reached the desired facing yet (`Is_Rotating`).
+    #[must_use]
+    pub const fn is_rotating(self) -> bool {
+        self.current.0 != self.desired.0
+    }
+
+    /// Signed shortest turn from the current facing to the desired one (`Difference`).
+    #[must_use]
+    pub const fn difference(self) -> i8 {
+        self.desired.0.wrapping_sub(self.current.0) as i8
+    }
+
+    /// Signed shortest turn from the current facing to `dir` (`Difference(DirType)`).
+    #[must_use]
+    pub const fn difference_to(self, dir: Dir) -> i8 {
+        dir.0.wrapping_sub(self.current.0) as i8
+    }
+
+    /// Turns up to `rate` steps towards the desired facing (`Rotation_Adjust`); a rate
+    /// over 127 is capped. Returns whether the facing changed.
+    pub fn rotation_adjust(&mut self, rate: i32) -> bool {
+        if !self.is_rotating() {
+            return false;
+        }
+        let rate = rate.min(127);
+        let old = self.current;
+        let diff = i32::from(self.difference());
+        if diff.abs() < rate {
+            self.current = self.desired;
+        } else {
+            // `rate` is 0..=127 here, so the cast is exact.
+            let step = rate as u8;
+            self.current = Dir(if diff < 0 {
+                self.current.0.wrapping_sub(step)
+            } else {
+                self.current.0.wrapping_add(step)
+            });
+        }
+        old != self.current
+    }
+}
+
+#[cfg(test)]
+mod turning_tests {
+    use super::*;
+
+    #[test]
+    fn turns_the_short_way_and_lands_exactly() {
+        let mut f = Turning::new(Dir(250));
+        f.set_desired(Dir(10));
+        assert_eq!(f.difference(), 16);
+        assert!(f.rotation_adjust(5));
+        assert_eq!(f.current(), Dir(255));
+        f.rotation_adjust(5);
+        f.rotation_adjust(5);
+        assert_eq!(f.current(), Dir(9));
+        // |diff| (1) < rate: snap to the desired facing.
+        f.rotation_adjust(5);
+        assert_eq!(f.current(), Dir(10));
+        assert!(!f.is_rotating());
+        assert!(!f.rotation_adjust(5));
+        // Quirk kept: a remaining turn equal to the rate steps instead of snapping, which
+        // lands on the same facing anyway.
+        let mut g = Turning::new(Dir(0));
+        g.set_desired(Dir(200));
+        assert_eq!(g.difference(), -56);
+        g.rotation_adjust(56);
+        assert_eq!(g.current(), Dir(200));
+        // 200 -> 64 is 120 steps clockwise (through 0).
+        assert_eq!(g.difference_to(Dir(64)), 120);
+    }
+}

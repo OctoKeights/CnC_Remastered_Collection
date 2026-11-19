@@ -37,6 +37,8 @@
 pub mod components;
 pub mod crc;
 mod digest;
+pub mod drive;
+pub mod houses;
 pub mod map;
 pub mod resources;
 pub mod scenario;
@@ -50,5 +52,7 @@ pub use components::{
 };
 pub use map::Map;
 pub use resources::{CrtRng, Frame, GameCrc, SimRng};
-pub use scenario::{MapLoadReport, TerrainObject, icon_check_from_art, load_td_map};
+pub use scenario::{
+    MapLoadReport, TerrainObject, icon_check_from_art, load_td_scenario, spawn_td_unit,
+};
 pub use simulation::{DEFAULT_SYNC_HISTORY, ObjectSpawn, Phase, Simulation, Threading, Tick};
