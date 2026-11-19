@@ -91,7 +91,7 @@ fn straight_cell_takes_31_ticks() {
     let world = sim.world();
     let map = world.resource::<Map>();
     assert_eq!(map.cell(to).occupiers(), [tank]);
-    assert!(map.cell(from).occupiers().is_empty());
+    assert_eq!(map.cell(from).occupiers(), []);
     // The vehicle bit now marks where the tank stands, and nowhere else.
     let flagged: Vec<usize> = (0..map.cells().len())
         .filter(|&i| map.cells()[i].vehicle_reserved())
