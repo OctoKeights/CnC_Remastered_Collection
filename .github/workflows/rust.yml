@@ -33,5 +33,6 @@ jobs:
           python3 tools/gen_blowfish.py
           python3 tools/gen_adpcm.py
           python3 tools/gen_ra_rules.py
+          python3 tools/gen_td_data.py
           cargo fmt --all
           git diff --exit-code -- crates/

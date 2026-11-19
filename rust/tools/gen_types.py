@@ -39,7 +39,8 @@ GAMES = {
     ),
 }
 
-SKIP_IFDEFS = {"PETROGLYPH_EXAMPLE_MOD"}
+# Symbols neither game defines: their blocks are dead code (e.g. `STRUCT_ROAD` in TD).
+SKIP_IFDEFS = {"PETROGLYPH_EXAMPLE_MOD", "OBSOLETE", "NEVER", "ADVANCED"}
 
 
 def strip_disabled(text: str) -> str:

@@ -3,6 +3,7 @@
 //! So far this covers the game's identifiers and its scenario map format; the simulation
 //! itself is still to be ported (see `rust/PORTING.md`).
 
+pub mod data;
 pub mod map;
 pub mod scenario;
 pub mod scripting;

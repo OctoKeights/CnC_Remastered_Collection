@@ -222,18 +222,16 @@ cnc_core::named_enum! {
         V36 = 58 => "V36",
         /// `STRUCT_V37` (INI name `V37`).
         V37 = 59 => "V37",
-        /// `STRUCT_ROAD` (INI name `ROAD`).
-        Road = 60 => "ROAD",
         /// `STRUCT_SANDBAG_WALL` (INI name `SBAG`).
-        SandbagWall = 61 => "SBAG",
+        SandbagWall = 60 => "SBAG",
         /// `STRUCT_CYCLONE_WALL` (INI name `CYCL`).
-        CycloneWall = 62 => "CYCL",
+        CycloneWall = 61 => "CYCL",
         /// `STRUCT_BRICK_WALL` (INI name `BRIK`).
-        BrickWall = 63 => "BRIK",
+        BrickWall = 62 => "BRIK",
         /// `STRUCT_BARBWIRE_WALL` (INI name `BARB`).
-        BarbwireWall = 64 => "BARB",
+        BarbwireWall = 63 => "BARB",
         /// `STRUCT_WOOD_WALL` (INI name `WOOD`).
-        WoodWall = 65 => "WOOD",
+        WoodWall = 64 => "WOOD",
     }
 }
 
